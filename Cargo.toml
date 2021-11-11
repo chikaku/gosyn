@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "shika_proc_macro",
+    "shika_parser",
+]
