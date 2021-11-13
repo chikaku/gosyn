@@ -1,6 +1,7 @@
 use crate::token::Operator;
 use crate::token::Token;
 use crate::{Keyword, LitKind};
+use std::collections::VecDeque;
 use std::ops::Add;
 use std::str::FromStr;
 
@@ -13,7 +14,7 @@ pub struct Scanner {
     lines: Vec<usize>,
 
     prev: Option<Token>,
-    next: Vec<PosTok>,
+    next: VecDeque<PosTok>,
 }
 
 impl Scanner {
@@ -55,7 +56,9 @@ impl Scanner {
                 | Token::Keyword(
                     Keyword::Break | Keyword::Continue | Keyword::FallThrough | Keyword::Return,
                 ),
-            ) => self.next.push((pos, Token::Operator(Operator::SemiColon))),
+            ) => self
+                .next
+                .push_front((pos, Token::Operator(Operator::SemiColon))),
             _ => {}
         }
     }
@@ -79,74 +82,101 @@ impl Scanner {
         skipped
     }
 
+    pub fn rewind(&mut self, pos_tok: PosTok) {
+        self.next.push_front(pos_tok);
+    }
+
     pub fn next_token(&mut self) -> Option<PosTok> {
+        if let Some(pos_tok) = self.next.pop_back() {
+            return Some(pos_tok);
+        }
+
         self.skip_whitespace();
-        if let Some(pos_tok) = self.next.pop() {
+        if let Some(pos_tok) = self.next.pop_back() {
             return Some(pos_tok);
         }
 
         let (pos, tok) = self.scan_token()?;
+        self.pos += tok.length();
         self.prev = Some(tok.clone());
         Some((pos, tok))
     }
 
     /// return next Token and position
     pub fn scan_token(&mut self) -> Option<PosTok> {
-        let pos = self.pos;
+        let current = self.pos;
 
         // scan 3 char
         if let Some(next3) = self.source.get(self.pos..self.pos + 3) {
             if let Some(tok) = Operator::from_str(next3).ok() {
-                self.pos += 3;
-                return Some((pos, tok.into()));
+                return Some((current, tok.into()));
             }
         }
 
         if let Some(next2) = self.source.get(self.pos..self.pos + 2) {
             if matches!(next2, "//") {
                 let comment = self.scan_line_comment();
-                self.pos += comment.len();
-                return Some((pos, Token::Comment(comment.trim().to_string())));
+                return Some((current, Token::Comment(comment.trim().to_string())));
             }
 
             if matches!(next2, "/*") {
                 let comment = self.scan_general_comment();
-                self.pos += comment.len();
-                return Some((pos, Token::Comment(comment)));
+                return Some((current, Token::Comment(comment)));
             }
 
             if let Some(tok) = Operator::from_str(next2).ok() {
-                self.pos += 2;
-                return Some((pos, tok.into()));
+                return Some((current, tok.into()));
             }
         }
 
         let next1 = self.source.get(self.pos..self.pos + 1)?;
         if let Some(tok) = Operator::from_str(next1).ok() {
-            self.pos += 1;
-            return Some((pos, tok.into()));
+            return Some((current, tok.into()));
         }
 
-        let ch = next1.chars().next().unwrap();
-        if ch.is_alphabetic() {
-            let identify = next1.to_string().add(self.scan_ident().as_str());
-            self.pos += identify.len();
-
-            return match Keyword::from_str(&identify) {
-                Ok(word) => Some((pos, Token::Keyword(word))),
-                _ => Some((pos, Token::Literal(LitKind::Ident, identify))),
-            };
+        match next1.chars().nth(0) {
+            Some('"' | '`') => Some((
+                current,
+                Token::Literal(LitKind::String, self.scan_lit_string()),
+            )),
+            Some(ch) if !ch.is_numeric() => {
+                // TODO: fix identify unicode ranges
+                // https://golang.org/ref/spec#Letters_and_digits
+                let identify = self.scan_identify();
+                Some((
+                    current,
+                    match Keyword::from_str(&identify) {
+                        Ok(word) => Token::Keyword(word),
+                        _ => Token::Literal(LitKind::Ident, identify),
+                    },
+                ))
+            }
+            _ => None,
         }
-
-        None
     }
 
-    fn scan_ident(&mut self) -> String {
+    /// scan an identify
+    /// caller must ensure that the first character is alphabetic
+    /// caller should check if identify is a keyword
+    fn scan_identify(&mut self) -> String {
         self.source
             .chars()
-            .skip(self.pos + 1)
-            .take_while(|ch| ch.is_alphabetic() || ch.is_alphanumeric())
+            .skip(self.pos)
+            .take_while(|ch| !ch.is_whitespace())
             .collect()
+    }
+
+    fn scan_lit_string(&mut self) -> String {
+        let mut chars = self.source.chars().skip(self.pos);
+        let ch0 = chars.nth(0).unwrap();
+        assert!(ch0 == '"' || ch0 == '`');
+
+        // let chars = chars.skip(1);
+        let lit = chars.take_while(|&ch| ch != ch0).collect::<String>();
+        let mut chars = self.source.chars().skip(self.pos + lit.len() + 1);
+        assert_eq!(chars.next(), Some(ch0));
+
+        format!("{}{}{}", ch0, lit, ch0)
     }
 
     /// Scan line comment from `//` to `\n`
@@ -158,8 +188,8 @@ impl Scanner {
             .collect()
     }
 
-    /// Scan general comment from `/*` to `*/`  
-    /// TODO: handle `*/` not found
+    /// Scan general comment from `/*` to `*/`
+    /// TODO: no termination `*/`
     fn scan_general_comment(&mut self) -> String {
         let it0 = self.source.chars().skip(self.pos);
         let it1 = self.source.chars().skip(self.pos + 1);
@@ -182,53 +212,21 @@ impl Scanner {
 #[cfg(test)]
 mod test {
     use crate::scanner::Scanner;
-    use crate::token::{Operator, Token};
 
     #[test]
     fn scan_comment() {
         let mut scanner = Scanner::new("// 123\r\n//123\n/*123*/");
-
-        assert_eq!(
-            scanner.next_token().unwrap().1,
-            Token::Comment("// 123".into()),
-        );
-
-        assert_eq!(
-            scanner.next_token().unwrap().1,
-            Token::Comment("//123".into()),
-        );
-
-        assert_eq!(
-            scanner.next_token().unwrap().1,
-            Token::Comment("/*123*/".into()),
-        );
+        assert_eq!(&scanner.scan_line_comment(), "// 123\r");
+        scanner.pos += 8;
+        assert_eq!(&scanner.scan_line_comment(), "//123");
+        scanner.pos += 6;
+        assert_eq!(&scanner.scan_line_comment(), "/*123*/");
     }
-
-    #[test]
-    fn scan_token() {
-        assert_eq!(
-            Scanner::new("...").next_token().unwrap().1,
-            Operator::Ellipsis.into()
-        );
-
-        assert_eq!(
-            Scanner::new(">=").next_token().unwrap().1,
-            Operator::GreaterEqual.into()
-        );
-    }
-
-    const CODE: &'static str = r#"package main
-    /*  
-    
- */
-
-    // 123
-
-    "#;
 
     #[test]
     fn scan_line_info() {
-        let mut scanner = Scanner::new(CODE);
+        let code = "package main\n    /*  \n    \n */\n\n    // 123\n\n    ";
+        let mut scanner = Scanner::new(code);
         while let Some(_) = scanner.next_token() {}
         let mut lines = scanner.lines.iter();
         assert_eq!(lines.next(), Some(&13));
@@ -239,5 +237,13 @@ mod test {
         assert_eq!(lines.next(), Some(&43));
         assert_eq!(lines.next(), Some(&44));
         assert_eq!(lines.next(), None);
+    }
+
+    #[test]
+    fn scan_lit_string() {
+        let mut scanner = Scanner::new("\"123\"`2312\n123\"123`");
+        assert_eq!(&scanner.scan_lit_string(), "\"123\"");
+        scanner.pos += 5;
+        assert_eq!(&scanner.scan_lit_string(), "`2312\n123\"123`");
     }
 }

@@ -2,13 +2,15 @@ use crate::token::Pos;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+#[derive(Default, Debug)]
 pub struct Comment {
     pub pos: Pos,
     pub text: String,
 }
 
+#[derive(Default, Debug)]
 pub struct Import {
-    pub docs: Vec<Comment>,
+    pub docs: Vec<Rc<Comment>>,
     pub name: String,
     pub path: String,
 }

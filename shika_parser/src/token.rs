@@ -1,6 +1,6 @@
 use shika_proc_macro::EnumFrom;
 
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum LitKind {
     Ident,
     Integer,
@@ -193,5 +193,16 @@ impl From<Keyword> for Token {
 impl From<Operator> for Token {
     fn from(op: Operator) -> Self {
         Self::Operator(op)
+    }
+}
+
+impl Token {
+    pub fn length(&self) -> usize {
+        match self {
+            Token::Comment(text) => text.len(),
+            Token::Keyword(word) => word.to_str().len(),
+            Token::Operator(op) => op.to_str().len(),
+            Token::Literal(_, value) => value.len(),
+        }
     }
 }

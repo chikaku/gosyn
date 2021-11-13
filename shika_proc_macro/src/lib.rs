@@ -14,14 +14,21 @@ pub fn enum_from(input: TokenStream) -> TokenStream {
     let vars = match input.data {
         Data::Enum(data) => variant_attr_args(data, "enum_from", "str"),
         _ => panic!("{} is not an enum", enum_name),
-    }
-    .iter()
-    .map(|(variant, value)| {
-        format!("{} => Ok(Self::{})", value, variant)
-            .parse()
-            .unwrap()
-    })
-    .collect::<Vec<proc_macro2::TokenStream>>();
+    };
+
+    let from_str = vars
+        .iter()
+        .map(|(variant, value)| {
+            format!("{} => Ok(Self::{})", value, variant)
+                .parse()
+                .unwrap()
+        })
+        .collect::<Vec<proc_macro2::TokenStream>>();
+
+    let to_str = vars
+        .iter()
+        .map(|(variant, value)| format!("Self::{} => {}", variant, value).parse().unwrap())
+        .collect::<Vec<proc_macro2::TokenStream>>();
 
     (quote! {
         impl ::std::str::FromStr for #enum_name {
@@ -29,8 +36,16 @@ pub fn enum_from(input: TokenStream) -> TokenStream {
 
             fn from_str(s: &str) -> Result<Self, Self::Err> {
                 match s {
-                    #(#vars,)*
+                    #(#from_str,)*
                     _ => Err("not found"),
+                }
+            }
+        }
+
+        impl #enum_name {
+            fn to_str(&self) -> &'static str {
+                match self {
+                    #(#to_str,)*
                 }
             }
         }
