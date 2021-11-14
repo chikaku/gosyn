@@ -69,7 +69,8 @@ impl Scanner {
             if ch.is_whitespace() {
                 if ch == '\n' {
                     self.add_line(self.pos + 1);
-                    self.try_insert_semicolon(self.pos)
+                    self.try_insert_semicolon(self.pos);
+                    self.prev = Some(Operator::SemiColon.into());
                 }
 
                 skipped += 1;

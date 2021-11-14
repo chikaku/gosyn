@@ -111,16 +111,20 @@ impl Parser {
     }
 }
 
+const VAR: Token = Token::Keyword(Keyword::Var);
+const TYPE: Token = Token::Keyword(Keyword::Type);
+const FUNC: Token = Token::Keyword(Keyword::Func);
+const CONST: Token = Token::Keyword(Keyword::Const);
 const IMPORT: Token = Token::Keyword(Keyword::Import);
 const PAREN_LEFT: Token = Token::Operator(Operator::ParenLeft);
 const PAREN_RIGHT: Token = Token::Operator(Operator::ParenRight);
 const SEMI_COLON: Token = Token::Operator(Operator::SemiColon);
 
 impl Parser {
-    fn unexpected(&self, pos: usize, expect: Vec<Token>, actual: Option<Token>) -> Error {
+    fn unexpected(&self, pos: usize, expect: Vec<Token>, actual: Token) -> Error {
         Error::ParseError {
             expect,
-            actual,
+            actual: Some(actual),
             path: self.path.clone(),
             location: self.scan.line_info(pos),
         }
@@ -138,8 +142,8 @@ impl Parser {
     fn expect_next(&mut self, expect: Token) -> Result<()> {
         match self.next() {
             Some((_, actual)) if actual == expect.clone() => Ok(()),
-            Some((pos, actual)) => Err(self.unexpected(pos, vec![expect], Some(actual))),
-            _ => Err(self.unexpected(self.scan.position(), vec![expect], None)),
+            Some((pos, actual)) => Err(self.unexpected(pos, vec![expect], actual)),
+            _ => Err(self.unexpected_none(vec![expect])),
         }
     }
 
@@ -147,27 +151,28 @@ impl Parser {
         match self.next() {
             None => Ok(true),
             Some((_, actual)) if actual == expect => Ok(false),
-            Some((pos, actual)) => Err(self.unexpected(pos, vec![expect], Some(actual))),
+            Some((pos, other)) => Err(self.unexpected(pos, vec![expect], other)),
         }
     }
 
-    fn expect_identify(&mut self) -> Result<String> {
+    fn expect_identify(&mut self) -> Result<ast::Ident> {
         let expect = Token::Literal(LitKind::Ident, String::new());
-        let exp_list = vec![expect];
         match self.next() {
-            Some((_, Token::Literal(LitKind::Ident, name))) => Ok(name),
-            Some((pos, actual)) => Err(self.unexpected(pos, exp_list, Some(actual))),
-            _ => Err(self.unexpected(self.scan.position(), exp_list, None)),
+            Some((pos, Token::Literal(LitKind::Ident, name))) => Ok(ast::Ident { pos, name }),
+            Some((pos, actual)) => Err(self.unexpected(pos, vec![expect], actual)),
+            _ => Err(self.unexpected_none(vec![expect])),
         }
     }
 
-    fn expect_literal(&mut self, expect: LitKind) -> Result<String> {
+    fn expect_literal(&mut self, expect: LitKind) -> Result<ast::BasicLit> {
         // TODO: handle literal symbol
         let fake = Token::Literal(expect, String::new());
         let exp_list = vec![fake];
         match self.next() {
-            Some((_, Token::Literal(kind, value))) if kind == expect => Ok(value),
-            Some((pos, actual)) => Err(self.unexpected(pos, exp_list, Some(actual))),
+            Some((pos, Token::Literal(kind, value))) if kind == expect => {
+                Ok(ast::BasicLit { pos, kind, value })
+            }
+            Some((pos, actual)) => Err(self.unexpected(pos, exp_list, actual)),
             _ => Err(self.unexpected_none(exp_list)),
         }
     }
@@ -200,13 +205,27 @@ impl Parser {
 
         // match Package {identify} with comments
         self.expect_next(Keyword::Package.into())?;
-        file.package = self.expect_identify()?;
+        file.name = self.expect_identify()?;
         file.document.append(&mut self.lead_comments);
         self.expect_next_none_or(SEMI_COLON)?;
 
-        let mut pos_tok = self.next();
-        while let Some((_, Token::Keyword(Keyword::Import))) = pos_tok {
-            pos_tok = self.next();
+        // match Import declaration
+        file.imports.extend(self.parse_imports()?);
+
+        // match Var Const Type Func
+        match self.next() {
+            Some((pos, VAR)) => {
+                self.rewind(Some((pos, VAR)));
+                self.parse_var();
+            }
+            Some((_, CONST)) => {}
+            Some((_, TYPE)) => {}
+            Some((_, FUNC)) => {}
+
+            None => {}
+            Some((pos, other)) => {
+                return Err(self.unexpected(pos, vec![VAR, CONST, TYPE, FUNC], other))
+            }
         }
 
         file.comments.append(&mut self.comments);
@@ -215,19 +234,23 @@ impl Parser {
 
     fn parse_imports(&mut self) -> Result<Vec<ast::Import>> {
         let mut imports = vec![];
-        while matches!(self.next(), Some((_, IMPORT))) {
-            let pos_tok = self.next();
+        let mut pos_tok = self.next();
+        while matches!(pos_tok, Some((_, IMPORT))) {
+            pos_tok = self.next();
             if matches!(pos_tok, Some((_, PAREN_LEFT))) {
                 imports.extend(self.parse_import_group()?);
                 self.expect_next_none_or(SEMI_COLON)?;
+                pos_tok = self.next();
                 continue;
             }
 
             self.rewind(pos_tok);
             imports.push(self.parse_import_sepc()?);
             self.expect_next_none_or(SEMI_COLON)?;
+            pos_tok = self.next();
         }
 
+        self.rewind(pos_tok);
         Ok(imports)
     }
 
@@ -235,15 +258,30 @@ impl Parser {
         let mut docs = Vec::new();
         docs.append(&mut self.lead_comments);
 
+        let exp_list = vec![
+            Operator::Period.into(),
+            Token::Literal(LitKind::Ident, String::new()),
+            Token::Literal(LitKind::String, String::new()),
+        ];
+
         let kind = LitKind::String;
-        let non = String::from("");
-        let dot = String::from(".");
         let (name, path) = match self.next() {
-            Some((_, Token::Literal(LitKind::Ident, idt))) => (idt, self.expect_literal(kind)?),
-            Some((_, Token::Operator(Operator::Period))) => (dot, self.expect_literal(kind)?),
-            Some((_, Token::Literal(LitKind::String, path))) => (non, path),
-            Some((pos, other)) => return Err(self.import_unexpected(pos, Some(other))),
-            None => return Err(self.import_unexpected(self.scan.position(), None)),
+            Some((pos, Token::Literal(LitKind::Ident, name))) => (
+                Some(ast::Ident { pos, name }),
+                self.expect_literal(kind)?.into(),
+            ),
+            Some((pos, Token::Operator(Operator::Period))) => {
+                let name = String::from(".");
+                (
+                    Some(ast::Ident { pos, name }),
+                    self.expect_literal(kind)?.into(),
+                )
+            }
+            Some((pos, Token::Literal(LitKind::String, value))) => {
+                (None, ast::StringLit { pos, value })
+            }
+            Some((pos, other)) => return Err(self.unexpected(pos, exp_list, other)),
+            None => return Err(self.unexpected_none(exp_list)),
         };
 
         Ok(ast::Import { docs, name, path })
@@ -264,17 +302,7 @@ impl Parser {
         Ok(imports)
     }
 
-    fn import_unexpected(&self, pos: usize, actual: Option<Token>) -> Error {
-        self.unexpected(
-            pos,
-            vec![
-                Operator::Period.into(),
-                Token::Literal(LitKind::Ident, String::new()),
-                Token::Literal(LitKind::String, String::new()),
-            ],
-            actual,
-        )
-    }
+    fn parse_var(&mut self) {}
 }
 
 #[cfg(test)]
@@ -287,7 +315,7 @@ mod test {
     #[test]
     fn parse_package() -> Result<()> {
         let ast = parse_source("package main")?;
-        assert_eq!(ast.package, String::from("main"));
+        assert_eq!(&ast.name.name, "main");
 
         Ok(())
     }
@@ -295,18 +323,24 @@ mod test {
     #[test]
     fn parse_imports() -> Result<()> {
         let imports = Parser::from_str(IMPORT_CODE).parse_imports()?;
-        let mut imports = imports
-            .iter()
-            .map(|Import { name, path, .. }| (name.as_str(), path.as_str()));
+        let mut imports = imports.iter().map(|Import { name, path, .. }| {
+            (
+                match name {
+                    None => None,
+                    Some(idt) => Some(idt.name.as_ref()),
+                },
+                path.value.as_str(),
+            )
+        });
 
-        assert_eq!(imports.next(), Some(("", "\"liba\"")));
-        assert_eq!(imports.next(), Some((".", "\"libb\"")));
-        assert_eq!(imports.next(), Some(("_", "\"libc\"")));
-        assert_eq!(imports.next(), Some(("d", "\"libd\"")));
-        assert_eq!(imports.next(), Some(("", "\"liba\"")));
-        assert_eq!(imports.next(), Some((".", "\"libb\"")));
-        assert_eq!(imports.next(), Some(("_", "\"libc\"")));
-        assert_eq!(imports.next(), Some(("d", "\"libd\"")));
+        assert_eq!(imports.next(), Some((None, "\"liba\"")));
+        assert_eq!(imports.next(), Some((Some("."), "\"libb\"")));
+        assert_eq!(imports.next(), Some((Some("_"), "\"libc\"")));
+        assert_eq!(imports.next(), Some((Some("d"), "\"libd\"")));
+        assert_eq!(imports.next(), Some((None, "\"liba\"")));
+        assert_eq!(imports.next(), Some((Some("."), "\"libb\"")));
+        assert_eq!(imports.next(), Some((Some("_"), "\"libc\"")));
+        assert_eq!(imports.next(), Some((Some("d"), "\"libd\"")));
         assert_eq!(imports.next(), None);
 
         Ok(())

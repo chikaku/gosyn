@@ -1,4 +1,5 @@
 use crate::token::Pos;
+use crate::LitKind;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -9,10 +10,51 @@ pub struct Comment {
 }
 
 #[derive(Default, Debug)]
+pub struct Ident {
+    pub pos: usize,
+    pub name: String,
+}
+
+pub struct BasicLit {
+    pub pos: usize,
+    pub kind: LitKind,
+    pub value: String,
+}
+
+#[derive(Default, Debug)]
+pub struct StringLit {
+    pub pos: usize,
+    pub value: String,
+}
+
+impl Into<StringLit> for BasicLit {
+    fn into(self) -> StringLit {
+        assert_eq!(self.kind, LitKind::String);
+        StringLit {
+            pos: self.pos,
+            value: self.value,
+        }
+    }
+}
+
+#[derive(Default, Debug)]
 pub struct Import {
     pub docs: Vec<Rc<Comment>>,
-    pub name: String,
-    pub path: String,
+    pub name: Option<Ident>,
+    pub path: StringLit,
+}
+
+pub enum Expression {}
+
+pub struct VarSpec {
+    docs: Vec<Rc<Comment>>,
+    name: Vec<String>,
+    type_: String,
+    values: Vec<Expression>,
+}
+
+pub enum Declaration {
+    Var(Vec<VarSpec>),
 }
 
 #[derive(Default)]
@@ -20,8 +62,8 @@ pub struct File {
     pub path: PathBuf,
     pub line_info: Vec<usize>,
 
+    pub name: Ident,
     pub comments: Vec<Rc<Comment>>,
     pub document: Vec<Rc<Comment>>,
-    pub package: String,
     pub imports: Vec<Import>,
 }
