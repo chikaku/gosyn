@@ -1,6 +1,6 @@
 use crate::token::Operator;
 use crate::token::Token;
-use crate::{Keyword, LitKind, BLANK};
+use crate::{Keyword, LitKind};
 use std::collections::VecDeque;
 use std::ops::Add;
 use std::str::FromStr;
@@ -32,10 +32,10 @@ impl Scanner {
     pub fn line_info(&self, pos: usize) -> (usize, usize) {
         self.lines
             .iter()
-            .zip(self.lines.iter().skip(1))
             .enumerate()
-            .find(|(_, (&a, &b))| a < pos && pos < b)
-            .map(|(index, (a, _))| (index + 1, pos - a))
+            .take_while(|(_, &start)| pos >= start)
+            .last()
+            .map(|(index, &start)| (index + 1, pos - start))
             .unwrap_or((1, pos))
     }
 
@@ -250,6 +250,15 @@ mod test {
         assert_eq!(lines.next(), Some(&43));
         assert_eq!(lines.next(), Some(&44));
         assert_eq!(lines.next(), None);
+    }
+
+    #[test]
+    fn get_line_info() {
+        let mut scanner = Scanner::default();
+        scanner.lines = vec![10, 20, 30];
+        assert_eq!(scanner.line_info(5), (1, 5));
+        assert_eq!(scanner.line_info(20), (2, 0));
+        assert_eq!(scanner.line_info(50), (3, 20));
     }
 
     #[test]

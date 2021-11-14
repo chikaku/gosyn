@@ -46,11 +46,26 @@ pub struct Import {
 
 pub enum Expression {}
 
+pub enum Type {
+    Identify(Ident),
+    Qualified(Ident, Ident),
+
+    Map,
+    Array(Box<Type>, Expression),
+    Slice(Box<Type>),
+    Struct,
+    Channel,
+    Pointer,
+    Function,
+    Interface,
+}
+
+#[derive(Default)]
 pub struct VarSpec {
-    docs: Vec<Rc<Comment>>,
-    name: Vec<String>,
-    type_: String,
-    values: Vec<Expression>,
+    pub docs: Vec<Rc<Comment>>,
+    pub name: Vec<Ident>,
+    pub typ: Option<Type>,
+    pub values: Vec<Expression>,
 }
 
 pub enum Declaration {

@@ -1,5 +1,7 @@
 use shika_proc_macro::EnumFrom;
 
+pub const BLANK: &'static str = "_";
+
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum LitKind {
     Ident,
