@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 shika_proc_macro = { path = "../shika_proc_macro" }
+unic-ucd-category = "0.9.0"

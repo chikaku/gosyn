@@ -1,9 +1,10 @@
 use crate::token::Operator;
 use crate::token::Token;
-use crate::{Keyword, LitKind};
+use crate::{Keyword, LitKind, BLANK};
 use std::collections::VecDeque;
 use std::ops::Add;
 use std::str::FromStr;
+use unic_ucd_category::GeneralCategory;
 
 pub type PosTok = (usize, Token);
 
@@ -140,9 +141,8 @@ impl Scanner {
                 current,
                 Token::Literal(LitKind::String, self.scan_lit_string()),
             )),
-            Some(ch) if !ch.is_numeric() => {
-                // TODO: fix identify unicode ranges
-                // https://golang.org/ref/spec#Letters_and_digits
+            Some(ch) if is_letter(ch) => {
+                // see https://golang.org/ref/spec#Characters
                 let identify = self.scan_identify();
                 Some((
                     current,
@@ -157,13 +157,13 @@ impl Scanner {
     }
 
     /// scan an identify
-    /// caller must ensure that the first character is alphabetic
+    /// caller must ensure that the first character is a unicode letter
     /// caller should check if identify is a keyword
     fn scan_identify(&mut self) -> String {
         self.source
             .chars()
             .skip(self.pos)
-            .take_while(|ch| !ch.is_whitespace())
+            .take_while(|&ch| is_letter(ch) || is_unicode_digit(ch))
             .collect()
     }
 
@@ -208,6 +208,18 @@ impl Scanner {
 
         comments.add("*/")
     }
+}
+
+fn is_unicode_letter(c: char) -> bool {
+    GeneralCategory::of(c).is_letter()
+}
+
+fn is_unicode_digit(c: char) -> bool {
+    matches!(GeneralCategory::of(c), GeneralCategory::DecimalNumber)
+}
+
+fn is_letter(c: char) -> bool {
+    is_unicode_letter(c) || c == '_'
 }
 
 #[cfg(test)]
