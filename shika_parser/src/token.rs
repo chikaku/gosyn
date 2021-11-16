@@ -1,4 +1,5 @@
 use shika_proc_macro::EnumFrom;
+use std::fmt::format;
 
 pub const BLANK: &'static str = "_";
 
@@ -205,6 +206,29 @@ impl Token {
             Token::Keyword(word) => word.to_str().len(),
             Token::Operator(op) => op.to_str().len(),
             Token::Literal(_, value) => value.len(),
+        }
+    }
+
+    pub fn as_expected(&self) -> String {
+        match self {
+            Token::Comment(_) => unreachable!(),
+            Token::Keyword(word) => format!("'{}'", word.to_str()),
+            Token::Operator(op) => format!("'{}'", op.to_str()),
+            Token::Literal(kind, _) => match kind {
+                LitKind::Ident => "Identifier".to_string(),
+                LitKind::String => "String Literals".to_string(),
+                LitKind::Integer => "Integer Literals".to_string(),
+                _ => unreachable!(),
+            },
+        }
+    }
+
+    pub fn as_actual(&self) -> String {
+        match self {
+            Token::Operator(_) => self.as_expected(),
+            Token::Keyword(_) => self.as_expected(),
+            Token::Literal(_, lit) => format!("'{}'", lit),
+            _ => unreachable!(),
         }
     }
 }

@@ -23,7 +23,7 @@ type Result<T> = result::Result<T, Error>;
 
 pub enum Error {
     IO(io::Error),
-    Unexpected {
+    UnexpectedToken {
         expect: Vec<Token>,
         actual: Option<Token>,
         path: PathBuf,
@@ -44,10 +44,9 @@ impl From<io::Error> for Error {
 
 impl Debug for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        // TODO: fix unexpected message
         match self {
             Error::IO(err) => write!(f, "os error: {}", err),
-            Error::Unexpected {
+            Error::UnexpectedToken {
                 expect,
                 actual,
                 path,
@@ -55,30 +54,24 @@ impl Debug for Error {
             } => {
                 let (line, offset) = location;
                 let path = path.as_os_str().to_str().unwrap();
-                let expect_str = if expect.len() > 0 {
-                    format!(
-                        "one of {:?}",
+                let file_line = format!("{}:{}:{}", path, line, offset);
+
+                let exp = match expect.len() {
+                    0 => format!("expected something"),
+                    1 => format!("expected {}", expect[0].as_expected()),
+                    _ => format!(
+                        "expected {}",
                         expect
                             .iter()
-                            .map(|tok| format!("{:?}", tok))
+                            .map(|t| t.as_expected())
                             .collect::<Vec<_>>()
-                            .join(", ")
-                    )
-                } else {
-                    format!("")
+                            .join(" or ")
+                    ),
                 };
 
                 match actual {
-                    Some(actual) => write!(
-                        f,
-                        "{:?}:{:?}:{:?} expect {:?} actual {:?}",
-                        path, line, offset, expect_str, actual,
-                    ),
-                    None => write!(
-                        f,
-                        "{:?}:{:?}:{:?} expect {:?} found EOF",
-                        path, line, offset, expect_str,
-                    ),
+                    None => write!(f, "{} {}, found EOF", file_line, exp),
+                    Some(tok) => write!(f, "{} {}, found {}", file_line, exp, tok.as_actual()),
                 }
             }
             Error::Other {
@@ -87,7 +80,8 @@ impl Debug for Error {
                 reason,
             } => {
                 let (line, offset) = location;
-                write!(f, "{:?}:{:?}:{:?} {:?}", path, line, offset, reason)
+                let path = path.as_os_str().to_str().unwrap();
+                write!(f, "{:}:{:}:{:} {:?}", path, line, offset, reason)
             }
         }
     }
@@ -143,7 +137,7 @@ const BRACE_RIGHT: Token = Token::Operator(Operator::BraceRight);
 
 impl Parser {
     fn unexpected(&self, pos: usize, expect: Vec<Token>, actual: Token) -> Error {
-        Error::Unexpected {
+        Error::UnexpectedToken {
             expect,
             actual: Some(actual),
             path: self.path.clone(),
@@ -152,7 +146,7 @@ impl Parser {
     }
 
     fn unexpected_none(&self, expect: Vec<Token>) -> Error {
-        Error::Unexpected {
+        Error::UnexpectedToken {
             expect,
             actual: None,
             path: self.path.clone(),
@@ -165,6 +159,17 @@ impl Parser {
             Some((_, actual)) if actual == expect.clone() => Ok(()),
             Some((pos, actual)) => Err(self.unexpected(pos, vec![expect], actual)),
             _ => Err(self.unexpected_none(vec![expect])),
+        }
+    }
+
+    fn forward_matched(&mut self, expect: Token) -> bool {
+        let pos_tok = self.next();
+        match pos_tok {
+            Some((_, tok)) if tok == expect => true,
+            _ => {
+                self.rewind(pos_tok);
+                false
+            }
         }
     }
 
@@ -204,13 +209,10 @@ impl Parser {
 
     fn expect_identifier_list(&mut self) -> Result<Vec<ast::Ident>> {
         let mut result = vec![self.expect_identify()?];
-        let mut pos_tok = self.next();
-        while matches!(pos_tok, Some((_, Token::Operator(Operator::Comma)))) {
+        while self.forward_matched(Token::Operator(Operator::Comma)) {
             result.push(self.expect_identify()?);
-            pos_tok = self.next();
         }
 
-        self.rewind(pos_tok);
         Ok(result)
     }
 
@@ -272,23 +274,17 @@ impl Parser {
 
     fn parse_imports(&mut self) -> Result<Vec<ast::Import>> {
         let mut imports = vec![];
-        let mut pos_tok = self.next();
-        while matches!(pos_tok, Some((_, IMPORT))) {
-            pos_tok = self.next();
-            if matches!(pos_tok, Some((_, PAREN_LEFT))) {
+        while self.forward_matched(IMPORT) {
+            if self.forward_matched(PAREN_LEFT) {
                 imports.extend(self.parse_import_group()?);
                 self.expect_next_none_or(SEMI_COLON)?;
-                pos_tok = self.next();
                 continue;
             }
 
-            self.rewind(pos_tok);
             imports.push(self.parse_import_sepc()?);
             self.expect_next_none_or(SEMI_COLON)?;
-            pos_tok = self.next();
         }
 
-        self.rewind(pos_tok);
         Ok(imports)
     }
 
@@ -327,14 +323,9 @@ impl Parser {
 
     fn parse_import_group(&mut self) -> Result<Vec<ast::Import>> {
         let mut imports = vec![];
-        let mut pos_tok = self.next();
-        while !matches!(pos_tok, Some((_, PAREN_RIGHT))) {
-            self.rewind(pos_tok);
+        while !self.forward_matched(PAREN_RIGHT) {
             imports.push(self.parse_import_sepc()?);
-            pos_tok = self.next();
-            if matches!(pos_tok, Some((_, SEMI_COLON))) {
-                pos_tok = self.next();
-            }
+            self.forward_matched(SEMI_COLON);
         }
 
         Ok(imports)
@@ -342,31 +333,19 @@ impl Parser {
 
     fn parse_var(&mut self) -> Result<Vec<VarSpec>> {
         let mut vars = vec![];
-        let mut pos_tok = self.next();
-        if matches!(pos_tok, Some((_, VAR))) {
-            pos_tok = self.next();
-            match pos_tok {
-                Some((_, PAREN_LEFT)) => {
-                    pos_tok = self.next();
-                    while !matches!(pos_tok, Some((_, PAREN_RIGHT))) {
-                        self.rewind(pos_tok);
-                        vars.push(self.parse_var_spec()?);
-                        pos_tok = self.next();
-                        if matches!(pos_tok, Some((_, SEMI_COLON))) {
-                            pos_tok = self.next();
-                        }
-                    }
-                }
-                _ => {
-                    self.rewind(pos_tok);
+        if self.forward_matched(VAR) {
+            if self.forward_matched(PAREN_LEFT) {
+                while !self.forward_matched(PAREN_RIGHT) {
                     vars.push(self.parse_var_spec()?);
-                    self.expect_next_none_or(SEMI_COLON)?;
-                    pos_tok = self.next();
+                    self.forward_matched(SEMI_COLON);
                 }
+                return Ok(vars);
             }
+
+            vars.push(self.parse_var_spec()?);
+            self.expect_next_none_or(SEMI_COLON)?;
         }
 
-        self.rewind(pos_tok);
         Ok(vars)
     }
 
@@ -374,9 +353,7 @@ impl Parser {
         let mut spec = ast::VarSpec::default();
         spec.name = self.expect_identifier_list()?;
 
-        let pos_tok = self.next();
-        if !matches!(pos_tok, Some((_, ASSIGN))) {
-            self.rewind(pos_tok);
+        if !self.forward_matched(ASSIGN) {
             spec.typ = Some(self.parse_type()?);
         }
 
@@ -395,14 +372,10 @@ impl Parser {
         match tok {
             Token::Literal(LitKind::Ident, name) => {
                 let id0 = ast::Ident { pos, name };
-                let pos_tok = self.next();
-                if matches!(pos_tok, Some((_, PERIOD))) {
-                    let id1 = self.expect_identify()?;
-                    return Ok(ast::Type::PkgNamed(id0, id1));
+                match self.forward_matched(PERIOD) {
+                    false => Ok(ast::Type::Named(id0)),
+                    true => Ok(ast::Type::PkgNamed(id0, self.expect_identify()?)),
                 }
-
-                self.rewind(pos_tok);
-                Ok(ast::Type::Named(id0))
             }
             PAREN_LEFT => {
                 let typ = self.parse_type()?;
@@ -410,13 +383,13 @@ impl Parser {
                 return Ok(typ);
             }
             BRACE_LEFT => {
-                let pos_tok = self.next();
-                if matches!(pos_tok, Some((_, BRACE_RIGHT))) {
+                if self.forward_matched(BRACE_RIGHT) {
+                    // Slice Type
                     let elem_type = self.parse_type()?;
                     return Ok(ast::Type::Slice(Box::new(elem_type)));
                 }
 
-                self.rewind(pos_tok);
+                // Array Type
                 // TODO: expect Expression
                 unimplemented!();
             }
@@ -428,12 +401,11 @@ impl Parser {
                 Ok(ast::Type::Map(key_type, val_type))
             }
             CHAN => {
-                let pos_tok = self.next();
-                let mut ch_mode = ChanMode::None;
-                if matches!(pos_tok, Some((_, ARROW))) {
-                    ch_mode = ChanMode::Send;
-                }
-                self.rewind(pos_tok);
+                let ch_mode = match self.forward_matched(ARROW) {
+                    true => ChanMode::Send,
+                    false => ChanMode::None,
+                };
+
                 let ch_type = Box::new(self.parse_type()?);
                 Ok(ast::Type::Channel(ch_mode, ch_type))
             }
