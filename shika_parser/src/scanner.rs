@@ -8,6 +8,7 @@ use unic_ucd_category::GeneralCategory;
 
 pub type PosTok = (usize, Token);
 
+#[allow(dead_code)]
 #[derive(Default)]
 pub struct Scanner {
     pos: usize,

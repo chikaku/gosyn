@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::ast;
-use crate::ast::VarSpec;
+use crate::ast::{ChanMode, VarSpec};
 use crate::scanner::{PosTok, Scanner};
 use crate::token::{Keyword, LitKind, Operator, Token};
 
@@ -44,6 +44,7 @@ impl From<io::Error> for Error {
 
 impl Debug for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        // TODO: fix unexpected message
         match self {
             Error::IO(err) => write!(f, "os error: {}", err),
             Error::Unexpected {
@@ -64,10 +65,7 @@ impl Debug for Error {
                             .join(", ")
                     )
                 } else {
-                    format!(
-                        "{:?}",
-                        expect.get(0).expect("expected token shouldn't empty")
-                    )
+                    format!("")
                 };
 
                 match actual {
@@ -126,16 +124,22 @@ impl Parser {
 }
 
 const VAR: Token = Token::Keyword(Keyword::Var);
+const MAP: Token = Token::Keyword(Keyword::Map);
+const CHAN: Token = Token::Keyword(Keyword::Chan);
 const TYPE: Token = Token::Keyword(Keyword::Type);
 const FUNC: Token = Token::Keyword(Keyword::Func);
 const CONST: Token = Token::Keyword(Keyword::Const);
 const IMPORT: Token = Token::Keyword(Keyword::Import);
 
+const STAR: Token = Token::Operator(Operator::Sub);
+const ARROW: Token = Token::Operator(Operator::Arrow);
 const ASSIGN: Token = Token::Operator(Operator::Assign);
 const PERIOD: Token = Token::Operator(Operator::Period);
 const PAREN_LEFT: Token = Token::Operator(Operator::ParenLeft);
 const PAREN_RIGHT: Token = Token::Operator(Operator::ParenRight);
 const SEMI_COLON: Token = Token::Operator(Operator::SemiColon);
+const BRACE_LEFT: Token = Token::Operator(Operator::BraceLeft);
+const BRACE_RIGHT: Token = Token::Operator(Operator::BraceRight);
 
 impl Parser {
     fn unexpected(&self, pos: usize, expect: Vec<Token>, actual: Token) -> Error {
@@ -162,6 +166,10 @@ impl Parser {
             Some((pos, actual)) => Err(self.unexpected(pos, vec![expect], actual)),
             _ => Err(self.unexpected_none(vec![expect])),
         }
+    }
+
+    fn expect_some(&mut self) -> Result<PosTok> {
+        self.next().ok_or(self.unexpected_none(vec![]))
     }
 
     fn expect_next_none_or(&mut self, expect: Token) -> Result<bool> {
@@ -366,55 +374,76 @@ impl Parser {
         let mut spec = ast::VarSpec::default();
         spec.name = self.expect_identifier_list()?;
 
-        // How to check there is a Type ?
         let pos_tok = self.next();
-        match pos_tok {
-            Some((_, ASSIGN)) => {
-                self.rewind(pos_tok);
-            }
-            None | Some((_, PAREN_RIGHT)) | Some((_, SEMI_COLON)) => {
-                self.rewind(pos_tok);
-                return Ok(spec);
-            }
-            _ => {
-                self.rewind(pos_tok);
-                spec.typ = Some(self.parse_type()?);
-            }
-        };
+        if !matches!(pos_tok, Some((_, ASSIGN))) {
+            self.rewind(pos_tok);
+            spec.typ = Some(self.parse_type()?);
+        }
 
         let pos_tok = self.next();
-        match pos_tok {
-            Some((_, ASSIGN)) => {
-                spec.values = todo!();
-            }
-            _ => self.rewind(pos_tok),
+        if matches!(pos_tok, Some((_, ASSIGN))) {
+            // TODO: expect expression list
+            self.rewind(pos_tok);
+            todo!();
         }
 
         Ok(spec)
     }
 
-    fn parse_type(&mut self) -> Result<ast::Type> {
-        match self.next() {
-            Some((pos, Token::Literal(LitKind::Ident, name))) => {
+    pub fn parse_type(&mut self) -> Result<ast::Type> {
+        let (pos, tok) = self.expect_some()?;
+        match tok {
+            Token::Literal(LitKind::Ident, name) => {
                 let id0 = ast::Ident { pos, name };
                 let pos_tok = self.next();
                 if matches!(pos_tok, Some((_, PERIOD))) {
                     let id1 = self.expect_identify()?;
-                    return Ok(ast::Type::Qualified(id0, id1));
+                    return Ok(ast::Type::PkgNamed(id0, id1));
                 }
 
                 self.rewind(pos_tok);
-                return Ok(ast::Type::Identify(id0));
+                Ok(ast::Type::Named(id0))
             }
-            Some((_, PAREN_LEFT)) => {
+            PAREN_LEFT => {
                 let typ = self.parse_type()?;
                 self.expect_next(PAREN_RIGHT)?;
                 return Ok(typ);
             }
-            _ => todo!(),
-        }
+            BRACE_LEFT => {
+                let pos_tok = self.next();
+                if matches!(pos_tok, Some((_, BRACE_RIGHT))) {
+                    let elem_type = self.parse_type()?;
+                    return Ok(ast::Type::Slice(Box::new(elem_type)));
+                }
 
-        todo!()
+                self.rewind(pos_tok);
+                // TODO: expect Expression
+                unimplemented!();
+            }
+            MAP => {
+                self.expect_next(BRACE_LEFT)?;
+                let key_type = Box::new(self.parse_type()?);
+                self.expect_next(BRACE_RIGHT)?;
+                let val_type = Box::new(self.parse_type()?);
+                Ok(ast::Type::Map(key_type, val_type))
+            }
+            CHAN => {
+                let pos_tok = self.next();
+                let mut ch_mode = ChanMode::None;
+                if matches!(pos_tok, Some((_, ARROW))) {
+                    ch_mode = ChanMode::Send;
+                }
+                self.rewind(pos_tok);
+                let ch_type = Box::new(self.parse_type()?);
+                Ok(ast::Type::Channel(ch_mode, ch_type))
+            }
+            ARROW => Ok(ast::Type::Channel(
+                ChanMode::Receive,
+                Box::new(self.parse_type()?),
+            )),
+            STAR => Ok(ast::Type::Pointer(Box::new(self.parse_type()?))),
+            _ => unimplemented!(),
+        }
     }
 }
 
@@ -435,15 +464,40 @@ mod test {
     }
 
     #[test]
-    fn parse_var() -> Result<()> {
-        let var = Parser::from_str("var a int").parse_var()?;
-        let var = var.first().unwrap();
-        assert!(matches!(var.typ, Some(Type::Identify(_))));
+    fn parse_type() -> Result<()> {
+        let type_of = |x| Parser::from_str(x).parse_type();
+        assert!(matches!(type_of("int")?, Type::Named(_)));
+        assert!(matches!(type_of("((int))")?, Type::Named(_)));
+        assert!(matches!(type_of("a.b;")?, Type::PkgNamed(..)));
+        assert!(matches!(type_of("[]int;")?, Type::Slice(..)));
+        assert!(matches!(type_of("map[int]map[int]int;")?, Type::Map(..)));
+        assert!(matches!(type_of("<-chan <- chan int;")?, Type::Channel(..)));
 
-        let var = Parser::from_str("var (a, b int; c, d int)").parse_var()?;
-        let mut var = var.iter();
-        assert_eq!(var.next().unwrap().name.len(), 2);
-        assert_eq!(var.next().unwrap().name.len(), 2);
+        Ok(())
+    }
+
+    const VAR_CODE: &'static str = r#"
+    var x1 int
+    var x2, x3 int
+    var x4 = 1
+    var x5, x6 = 1, 2
+    var x7 int = 1
+    var x8, x9 int = 1, 2
+    
+    var (
+        x10      int
+        x11, x12 int = 3, 4
+        x15, x16     = 7, 8
+    )
+    
+    var (x17 int = 9; x18 int = 10);
+    var (x19=11;x20 int=12;);
+    "#;
+
+    #[test]
+    fn parse_var() -> Result<()> {
+        let ast = Parser::from_str(VAR_CODE).parse_var()?;
+        assert_eq!(ast.len(), 9);
 
         Ok(())
     }

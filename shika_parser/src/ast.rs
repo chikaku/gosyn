@@ -46,18 +46,26 @@ pub struct Import {
 
 pub enum Expression {}
 
+#[allow(dead_code)]
 pub enum Type {
-    Identify(Ident),
-    Qualified(Ident, Ident),
+    Named(Ident),           // T
+    PkgNamed(Ident, Ident), // p.T
 
-    Map,
-    Array(Box<Type>, Expression),
-    Slice(Box<Type>),
-    Struct,
-    Channel,
-    Pointer,
-    Function,
-    Interface,
+    Map(Box<Type>, Box<Type>),    // map[K]V
+    Array(Box<Type>, Expression), // [N]T
+    Slice(Box<Type>),             // []T
+    Channel(ChanMode, Box<Type>), // <- chan T
+    Pointer(Box<Type>),           // *T
+
+    Function(),
+    Interface(),
+    Struct(Vec<(Vec<Ident>, Box<Type>)>),
+}
+
+pub enum ChanMode {
+    None,
+    Send,
+    Receive,
 }
 
 #[derive(Default)]
@@ -68,6 +76,7 @@ pub struct VarSpec {
     pub values: Vec<Expression>,
 }
 
+#[allow(dead_code)]
 pub enum Declaration {
     Var(Vec<VarSpec>),
 }
