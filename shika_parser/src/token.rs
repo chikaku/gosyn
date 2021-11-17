@@ -1,7 +1,4 @@
 use shika_proc_macro::EnumFrom;
-use std::fmt::format;
-
-pub const BLANK: &'static str = "_";
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum LitKind {
@@ -184,8 +181,6 @@ pub enum Token {
     Operator(Operator),
     Literal(LitKind, String),
 }
-
-pub type Pos = usize;
 
 impl From<Keyword> for Token {
     fn from(word: Keyword) -> Self {

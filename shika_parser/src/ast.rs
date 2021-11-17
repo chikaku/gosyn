@@ -1,5 +1,5 @@
-use crate::token::Pos;
 use crate::LitKind;
+use crate::Pos;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -13,6 +13,15 @@ pub struct Comment {
 pub struct Ident {
     pub pos: usize,
     pub name: String,
+}
+
+#[derive(Default)]
+pub struct PkgName(pub Ident);
+
+impl Into<Ident> for PkgName {
+    fn into(self) -> Ident {
+        self.0
+    }
 }
 
 pub struct BasicLit {
@@ -48,8 +57,8 @@ pub enum Expression {}
 
 #[allow(dead_code)]
 pub enum Type {
-    Named(Ident),           // T
-    PkgNamed(Ident, Ident), // p.T
+    Named(Ident),             // T
+    PkgNamed(PkgName, Ident), // p.T
 
     Map(Box<Type>, Box<Type>),    // map[K]V
     Array(Box<Type>, Expression), // [N]T
@@ -86,7 +95,7 @@ pub struct File {
     pub path: PathBuf,
     pub line_info: Vec<usize>,
 
-    pub name: Ident,
+    pub name: PkgName,
     pub comments: Vec<Rc<Comment>>,
     pub document: Vec<Rc<Comment>>,
     pub imports: Vec<Import>,

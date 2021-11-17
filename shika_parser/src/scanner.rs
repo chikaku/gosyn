@@ -2,11 +2,25 @@ use crate::token::Operator;
 use crate::token::Token;
 use crate::{Keyword, LitKind};
 use std::collections::VecDeque;
-use std::ops::Add;
+use std::fmt::{Debug, Formatter};
 use std::str::FromStr;
 use unic_ucd_category::GeneralCategory;
 
-pub type PosTok = (usize, Token);
+pub type Pos = usize;
+pub type PosTok = (Pos, Token);
+
+pub struct Error {
+    pub pos: Pos,
+    pub reason: &'static str,
+}
+
+impl Debug for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.reason)
+    }
+}
+
+pub type Result<T> = core::result::Result<T, Error>;
 
 #[allow(dead_code)]
 #[derive(Default)]
@@ -89,55 +103,62 @@ impl Scanner {
         self.next.push_front(pos_tok);
     }
 
-    pub fn next_token(&mut self) -> Option<PosTok> {
+    pub fn next_token(&mut self) -> Result<Option<PosTok>> {
         if let Some(pos_tok) = self.next.pop_back() {
-            return Some(pos_tok);
+            return Ok(Some(pos_tok));
         }
 
         self.skip_whitespace();
         if let Some(pos_tok) = self.next.pop_back() {
-            return Some(pos_tok);
+            return Ok(Some(pos_tok));
         }
 
-        let (pos, tok) = self.scan_token()?;
-        self.pos += tok.length();
-        self.prev = Some(tok.clone());
-        Some((pos, tok))
+        match self.scan_token()? {
+            Some((pos, tok)) => {
+                self.pos += tok.length();
+                self.prev = Some(tok.clone());
+                Ok(Some((pos, tok)))
+            }
+            None => Ok(None),
+        }
     }
 
     /// return next Token and position
-    pub fn scan_token(&mut self) -> Option<PosTok> {
+    pub fn scan_token(&mut self) -> Result<Option<PosTok>> {
         let current = self.pos;
 
         // scan 3 char
         if let Some(next3) = self.source.get(self.pos..self.pos + 3) {
             if let Some(tok) = Operator::from_str(next3).ok() {
-                return Some((current, tok.into()));
+                return Ok(Some((current, tok.into())));
             }
         }
 
         if let Some(next2) = self.source.get(self.pos..self.pos + 2) {
             if matches!(next2, "//") {
                 let comment = self.scan_line_comment();
-                return Some((current, Token::Comment(comment.trim().to_string())));
+                return Ok(Some((current, Token::Comment(comment.trim().to_string()))));
             }
 
             if matches!(next2, "/*") {
-                let comment = self.scan_general_comment();
-                return Some((current, Token::Comment(comment)));
+                let comment = self.scan_general_comment()?;
+                return Ok(Some((current, Token::Comment(comment))));
             }
 
             if let Some(tok) = Operator::from_str(next2).ok() {
-                return Some((current, tok.into()));
+                return Ok(Some((current, tok.into())));
             }
         }
 
-        let next1 = self.source.get(self.pos..self.pos + 1)?;
-        if let Some(tok) = Operator::from_str(next1).ok() {
-            return Some((current, tok.into()));
-        }
+        let ch = match self.source.get(self.pos..self.pos + 1) {
+            None => return Ok(None),
+            Some(next1) => match Operator::from_str(next1).ok() {
+                Some(tok) => return Ok(Some((current, tok.into()))),
+                None => next1.chars().nth(0),
+            },
+        };
 
-        match next1.chars().nth(0) {
+        Ok(match ch {
             Some('"' | '`') => Some((
                 current,
                 Token::Literal(LitKind::String, self.scan_lit_string()),
@@ -154,7 +175,7 @@ impl Scanner {
                 ))
             }
             _ => None,
-        }
+        })
     }
 
     /// scan an identify
@@ -191,23 +212,25 @@ impl Scanner {
     }
 
     /// Scan general comment from `/*` to `*/`
-    /// TODO: no termination `*/`
-    fn scan_general_comment(&mut self) -> String {
-        let it0 = self.source.chars().skip(self.pos);
-        let it1 = self.source.chars().skip(self.pos + 1);
-        let comments = it0
-            .zip(it1)
-            .take_while(|&x| x != ('*', '/'))
-            .map(|(x, _)| x)
-            .collect::<String>();
+    fn scan_general_comment(&mut self) -> Result<String> {
+        assert_eq!("/*", &self.source[self.pos..self.pos + 2]);
+        match self.source[self.pos..].find("*/") {
+            None => Err(Error {
+                pos: self.pos,
+                reason: "comment no termination '*/'",
+            }),
+            Some(pos) => {
+                let end = self.pos + pos + 2;
+                let comments = self.source.get(self.pos..end).unwrap().to_string();
+                for (index, ch) in comments.chars().enumerate() {
+                    if ch == '\n' {
+                        self.add_line(self.pos + index + 1)
+                    }
+                }
 
-        for (index, ch) in comments.chars().enumerate() {
-            if ch == '\n' {
-                self.add_line(self.pos + index + 1)
+                Ok(comments)
             }
         }
-
-        comments.add("*/")
     }
 }
 
@@ -241,7 +264,7 @@ mod test {
     fn scan_line_info() {
         let code = "package main\n    /*  \n    \n */\n\n    // 123\n\n    ";
         let mut scanner = Scanner::new(code);
-        while let Some(_) = scanner.next_token() {}
+        while let Some(_) = scanner.next_token().unwrap() {}
         let mut lines = scanner.lines.iter();
         assert_eq!(lines.next(), Some(&13));
         assert_eq!(lines.next(), Some(&22));

@@ -10,6 +10,7 @@ use crate::ast;
 use crate::ast::{ChanMode, VarSpec};
 use crate::scanner::{PosTok, Scanner};
 use crate::token::{Keyword, LitKind, Operator, Token};
+use crate::Pos;
 
 pub fn parse_source<S: AsRef<str>>(source: S) -> Result<ast::File> {
     Parser::from_str(source).run()
@@ -29,10 +30,10 @@ pub enum Error {
         path: PathBuf,
         location: (usize, usize),
     },
-    Other {
+    Else {
         path: PathBuf,
         location: (usize, usize),
-        reason: String,
+        reason: &'static str,
     },
 }
 
@@ -74,7 +75,7 @@ impl Debug for Error {
                     Some(tok) => write!(f, "{} {}, found {}", file_line, exp, tok.as_actual()),
                 }
             }
-            Error::Other {
+            Error::Else {
                 path,
                 location,
                 reason,
@@ -117,6 +118,10 @@ impl Parser {
     }
 }
 
+const ERR_PKG_NAME_BLANK: &'static str = "package name can't be blank";
+
+const BLANK: &'static str = "_";
+
 const VAR: Token = Token::Keyword(Keyword::Var);
 const MAP: Token = Token::Keyword(Keyword::Map);
 const CHAN: Token = Token::Keyword(Keyword::Chan);
@@ -134,6 +139,8 @@ const PAREN_RIGHT: Token = Token::Operator(Operator::ParenRight);
 const SEMI_COLON: Token = Token::Operator(Operator::SemiColon);
 const BRACE_LEFT: Token = Token::Operator(Operator::BraceLeft);
 const BRACE_RIGHT: Token = Token::Operator(Operator::BraceRight);
+
+const LIT_STRING: Token = Token::Literal(LitKind::String, String::new());
 
 impl Parser {
     fn unexpected(&self, pos: usize, expect: Vec<Token>, actual: Token) -> Error {
@@ -154,31 +161,41 @@ impl Parser {
         }
     }
 
+    fn else_error(&self, pos: Pos, reason: &'static str) -> Error {
+        let path = self.path.clone();
+        let location = self.scan.line_info(pos);
+        Error::Else {
+            path,
+            location,
+            reason,
+        }
+    }
+
     fn expect_next(&mut self, expect: Token) -> Result<()> {
-        match self.next() {
+        match self.next()? {
             Some((_, actual)) if actual == expect.clone() => Ok(()),
             Some((pos, actual)) => Err(self.unexpected(pos, vec![expect], actual)),
             _ => Err(self.unexpected_none(vec![expect])),
         }
     }
 
-    fn forward_matched(&mut self, expect: Token) -> bool {
-        let pos_tok = self.next();
-        match pos_tok {
+    fn forward_matched(&mut self, expect: Token) -> Result<bool> {
+        let pos_tok = self.next()?;
+        Ok(match pos_tok {
             Some((_, tok)) if tok == expect => true,
             _ => {
                 self.rewind(pos_tok);
                 false
             }
-        }
+        })
     }
 
     fn expect_some(&mut self) -> Result<PosTok> {
-        self.next().ok_or(self.unexpected_none(vec![]))
+        self.next()?.ok_or(self.unexpected_none(vec![]))
     }
 
     fn expect_next_none_or(&mut self, expect: Token) -> Result<bool> {
-        match self.next() {
+        match self.next()? {
             None => Ok(true),
             Some((_, actual)) if actual == expect => Ok(false),
             Some((pos, other)) => Err(self.unexpected(pos, vec![expect], other)),
@@ -187,29 +204,34 @@ impl Parser {
 
     fn expect_identify(&mut self) -> Result<ast::Ident> {
         let expect = Token::Literal(LitKind::Ident, String::new());
-        match self.next() {
+        match self.next()? {
             Some((pos, Token::Literal(LitKind::Ident, name))) => Ok(ast::Ident { pos, name }),
             Some((pos, actual)) => Err(self.unexpected(pos, vec![expect], actual)),
             _ => Err(self.unexpected_none(vec![expect])),
         }
     }
 
-    fn expect_literal(&mut self, expect: LitKind) -> Result<ast::BasicLit> {
-        // TODO: handle literal symbol
-        let fake = Token::Literal(expect, String::new());
-        let exp_list = vec![fake];
-        match self.next() {
+    fn expect_pkg_name(&mut self) -> Result<ast::PkgName> {
+        let id = self.expect_identify()?;
+        match id.name.as_str() {
+            BLANK => Err(self.else_error(id.pos, ERR_PKG_NAME_BLANK)),
+            _ => Ok(ast::PkgName(id)),
+        }
+    }
+
+    fn expect_string_literal(&mut self, expect: LitKind) -> Result<ast::StringLit> {
+        match self.next()? {
             Some((pos, Token::Literal(kind, value))) if kind == expect => {
-                Ok(ast::BasicLit { pos, kind, value })
+                Ok(ast::StringLit { pos, value })
             }
-            Some((pos, actual)) => Err(self.unexpected(pos, exp_list, actual)),
-            _ => Err(self.unexpected_none(exp_list)),
+            Some((pos, actual)) => Err(self.unexpected(pos, vec![LIT_STRING], actual)),
+            _ => Err(self.unexpected_none(vec![LIT_STRING])),
         }
     }
 
     fn expect_identifier_list(&mut self) -> Result<Vec<ast::Ident>> {
         let mut result = vec![self.expect_identify()?];
-        while self.forward_matched(Token::Operator(Operator::Comma)) {
+        while self.forward_matched(Token::Operator(Operator::Comma))? {
             result.push(self.expect_identify()?);
         }
 
@@ -222,8 +244,13 @@ impl Parser {
         }
     }
 
-    fn next(&mut self) -> Option<PosTok> {
-        let mut pos_tok = self.scan.next_token();
+    fn next(&mut self) -> Result<Option<PosTok>> {
+        let mut pos_tok = self.scan.next_token().map_err(|serr| Error::Else {
+            path: self.path.clone(),
+            location: self.scan.line_info(serr.pos),
+            reason: serr.reason,
+        })?;
+
         while let Some((pos, Token::Comment(text))) = pos_tok {
             let comment = Rc::new(ast::Comment { pos, text });
             self.comments.push(comment.clone());
@@ -232,10 +259,14 @@ impl Parser {
                 self.lead_comments.clear();
             }
 
-            pos_tok = self.scan.next_token();
+            pos_tok = self.scan.next_token().map_err(|serr| Error::Else {
+                path: self.path.clone(),
+                location: self.scan.line_info(serr.pos),
+                reason: serr.reason,
+            })?;
         }
 
-        pos_tok
+        Ok(pos_tok)
     }
 
     pub fn run(&mut self) -> Result<ast::File> {
@@ -244,8 +275,7 @@ impl Parser {
 
         // match Package {identify} with comments
         self.expect_next(Keyword::Package.into())?;
-        // TODO: check the identifier is a valid pkgname
-        file.name = self.expect_identify()?;
+        file.name = self.expect_pkg_name()?;
         file.document.append(&mut self.lead_comments);
         self.expect_next_none_or(SEMI_COLON)?;
 
@@ -253,7 +283,7 @@ impl Parser {
         file.imports.extend(self.parse_imports()?);
 
         // match Var Const Type Func declaration
-        match self.next() {
+        match self.next()? {
             Some((pos, VAR)) => {
                 self.rewind(Some((pos, VAR)));
                 self.parse_var()?;
@@ -274,8 +304,8 @@ impl Parser {
 
     fn parse_imports(&mut self) -> Result<Vec<ast::Import>> {
         let mut imports = vec![];
-        while self.forward_matched(IMPORT) {
-            if self.forward_matched(PAREN_LEFT) {
+        while self.forward_matched(IMPORT)? {
+            if self.forward_matched(PAREN_LEFT)? {
                 imports.extend(self.parse_import_group()?);
                 self.expect_next_none_or(SEMI_COLON)?;
                 continue;
@@ -299,16 +329,16 @@ impl Parser {
         ];
 
         let kind = LitKind::String;
-        let (name, path) = match self.next() {
+        let (name, path) = match self.next()? {
             Some((pos, Token::Literal(LitKind::Ident, name))) => (
                 Some(ast::Ident { pos, name }),
-                self.expect_literal(kind)?.into(),
+                self.expect_string_literal(kind)?.into(),
             ),
             Some((pos, Token::Operator(Operator::Period))) => {
                 let name = String::from(".");
                 (
                     Some(ast::Ident { pos, name }),
-                    self.expect_literal(kind)?.into(),
+                    self.expect_string_literal(kind)?.into(),
                 )
             }
             Some((pos, Token::Literal(LitKind::String, value))) => {
@@ -323,9 +353,9 @@ impl Parser {
 
     fn parse_import_group(&mut self) -> Result<Vec<ast::Import>> {
         let mut imports = vec![];
-        while !self.forward_matched(PAREN_RIGHT) {
+        while !self.forward_matched(PAREN_RIGHT)? {
             imports.push(self.parse_import_sepc()?);
-            self.forward_matched(SEMI_COLON);
+            self.forward_matched(SEMI_COLON)?;
         }
 
         Ok(imports)
@@ -333,11 +363,11 @@ impl Parser {
 
     fn parse_var(&mut self) -> Result<Vec<VarSpec>> {
         let mut vars = vec![];
-        if self.forward_matched(VAR) {
-            if self.forward_matched(PAREN_LEFT) {
-                while !self.forward_matched(PAREN_RIGHT) {
+        if self.forward_matched(VAR)? {
+            if self.forward_matched(PAREN_LEFT)? {
+                while !self.forward_matched(PAREN_RIGHT)? {
                     vars.push(self.parse_var_spec()?);
-                    self.forward_matched(SEMI_COLON);
+                    self.forward_matched(SEMI_COLON)?;
                 }
                 return Ok(vars);
             }
@@ -352,28 +382,25 @@ impl Parser {
     fn parse_var_spec(&mut self) -> Result<ast::VarSpec> {
         let mut spec = ast::VarSpec::default();
         spec.name = self.expect_identifier_list()?;
-
-        if !self.forward_matched(ASSIGN) {
+        if !self.forward_matched(ASSIGN)? {
             spec.typ = Some(self.parse_type()?);
         }
 
-        let pos_tok = self.next();
-        if matches!(pos_tok, Some((_, ASSIGN))) {
-            // TODO: expect expression list
-            self.rewind(pos_tok);
-            todo!();
+        if self.forward_matched(ASSIGN)? {
+            // TODO: expect ExpressionList
         }
 
+        // TODO: should expect something ?
         Ok(spec)
     }
 
     pub fn parse_type(&mut self) -> Result<ast::Type> {
         let (pos, tok) = self.expect_some()?;
         match tok {
-            Token::Literal(LitKind::Ident, name) => {
-                let id0 = ast::Ident { pos, name };
-                match self.forward_matched(PERIOD) {
-                    false => Ok(ast::Type::Named(id0)),
+            Token::Literal(LitKind::Ident, name) if &name != BLANK => {
+                let id0 = ast::PkgName(ast::Ident { pos, name });
+                match self.forward_matched(PERIOD)? {
+                    false => Ok(ast::Type::Named(id0.into())),
                     true => Ok(ast::Type::PkgNamed(id0, self.expect_identify()?)),
                 }
             }
@@ -383,8 +410,7 @@ impl Parser {
                 return Ok(typ);
             }
             BRACE_LEFT => {
-                if self.forward_matched(BRACE_RIGHT) {
-                    // Slice Type
+                if self.forward_matched(BRACE_RIGHT)? {
                     let elem_type = self.parse_type()?;
                     return Ok(ast::Type::Slice(Box::new(elem_type)));
                 }
@@ -401,7 +427,7 @@ impl Parser {
                 Ok(ast::Type::Map(key_type, val_type))
             }
             CHAN => {
-                let ch_mode = match self.forward_matched(ARROW) {
+                let ch_mode = match self.forward_matched(ARROW)? {
                     true => ChanMode::Send,
                     false => ChanMode::None,
                 };
@@ -414,7 +440,7 @@ impl Parser {
                 Box::new(self.parse_type()?),
             )),
             STAR => Ok(ast::Type::Pointer(Box::new(self.parse_type()?))),
-            _ => unimplemented!(),
+            _ => unimplemented!(), // TODO: raise error
         }
     }
 }
@@ -430,7 +456,7 @@ mod test {
     #[test]
     fn parse_package() -> Result<()> {
         let ast = parse_source("package main")?;
-        assert_eq!(&ast.name.name, "main");
+        assert_eq!(&ast.name.0.name, "main");
 
         Ok(())
     }
@@ -458,8 +484,8 @@ mod test {
     
     var (
         x10      int
-        x11, x12 int = 3, 4
-        x15, x16     = 7, 8
+        x11, x12 int = 3, 4;
+        x15, x16     = 7, 8;
     )
     
     var (x17 int = 9; x18 int = 10);
