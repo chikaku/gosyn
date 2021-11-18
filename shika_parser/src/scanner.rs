@@ -58,6 +58,13 @@ impl Scanner {
         self.lines.push(line_start);
     }
 
+    fn error(&self, reason: &'static str) -> Error {
+        Error {
+            reason,
+            pos: self.pos,
+        }
+    }
+
     fn try_insert_semicolon(&mut self, pos: usize) {
         match self.prev {
             Some(
@@ -154,16 +161,20 @@ impl Scanner {
             None => return Ok(None),
             Some(next1) => match Operator::from_str(next1).ok() {
                 Some(tok) => return Ok(Some((current, tok.into()))),
-                None => next1.chars().nth(0),
+                None => next1.chars().nth(0).unwrap(),
             },
         };
 
         Ok(match ch {
-            Some('"' | '`') => Some((
+            '"' | '`' => Some((
                 current,
                 Token::Literal(LitKind::String, self.scan_lit_string()),
             )),
-            Some(ch) if is_letter(ch) => {
+            '\'' => Some((
+                current,
+                Token::Literal(LitKind::Char, self.scan_lit_rune()?),
+            )),
+            ch if is_letter(ch) => {
                 // see https://golang.org/ref/spec#Characters
                 let identify = self.scan_identify();
                 Some((
@@ -187,6 +198,61 @@ impl Scanner {
             .skip(self.pos)
             .take_while(|&ch| is_letter(ch) || is_unicode_digit(ch))
             .collect()
+    }
+
+    fn scan_lit_rune(&mut self) -> Result<String> {
+        let mut chars = self.source.chars().skip(self.pos);
+        assert_eq!(chars.next(), Some('\''));
+        let mut values = String::from("'");
+
+        match chars.next() {
+            None => return Err(self.error("rune literal not terminated")),
+            Some('\\') => {
+                values.push('\\');
+                match chars.next() {
+                    Some(ch @ ('a' | 'b' | 'f' | 'n' | 'r' | 't' | 'v' | '\\' | '\'' | '"')) => {
+                        values.push(ch);
+                    }
+                    Some(k @ ('x' | 'u' | 'U')) => {
+                        for _ in 0..match k {
+                            'x' => 2,
+                            'u' => 4,
+                            'U' => 8,
+                            _ => unreachable!(),
+                        } {
+                            values.push(match chars.next() {
+                                Some(ch) if is_hex_digit(ch) => ch,
+                                Some(_) => return Err(self.error("illegal rune literal")),
+                                None => return Err(self.error("rune literal not terminated")),
+                            });
+                        }
+                    }
+                    Some(ch) if is_octal_digit(ch) => {
+                        values.push(ch);
+                        for _ in 0..2 {
+                            values.push(match chars.next() {
+                                Some(ch) if is_hex_digit(ch) => ch,
+                                Some(_) => return Err(self.error("illegal rune literal")),
+                                None => return Err(self.error("rune literal not terminated")),
+                            });
+                        }
+                    }
+                    Some(_) => return Err(self.error("unknown escape sequence")),
+                    None => return Err(self.error("rune literal not terminated")),
+                }
+            }
+            Some(ch) if is_unicode_char(ch) => values.push(ch),
+            Some(_) => return Err(self.error("illegal rune literal")),
+        }
+
+        match chars.next() {
+            Some(ch) if ch == '\'' => { /*ok*/ }
+            Some(_) => return Err(self.error("illegal rune literal")),
+            None => return Err(self.error("rune literal not terminated")),
+        }
+
+        // TODO: check valid Unicode code point, surrogate pairs
+        Ok(values)
     }
 
     fn scan_lit_string(&mut self) -> String {
@@ -234,6 +300,13 @@ impl Scanner {
     }
 }
 
+/// here are some difference from the golang specification of [Characters](https://golang.org/ref/spec#Characters)
+/// go's `unicode_char` is an arbitrary Unicode code point except newline
+/// but rust's char is a [unicode scalar value](https://www.unicode.org/glossary/#unicode_scalar_value)
+fn is_unicode_char(c: char) -> bool {
+    c != '\n'
+}
+
 fn is_unicode_letter(c: char) -> bool {
     GeneralCategory::of(c).is_letter()
 }
@@ -246,9 +319,42 @@ fn is_letter(c: char) -> bool {
     is_unicode_letter(c) || c == '_'
 }
 
+fn is_octal_digit(c: char) -> bool {
+    matches!(c, '0'..='7')
+}
+
+fn is_hex_digit(c: char) -> bool {
+    c.is_ascii_hexdigit()
+}
+
 #[cfg(test)]
 mod test {
     use crate::scanner::Scanner;
+
+    #[test]
+    fn scan_lit_rune() {
+        let rune = |s| Scanner::new(s).scan_lit_rune();
+        assert!(rune(r#"'a'"#).is_ok());
+        assert!(rune(r#"'ä'"#).is_ok());
+        assert!(rune(r#"'本'"#).is_ok());
+        assert!(rune(r#"'\t'"#).is_ok());
+        assert!(rune(r#"'\000'"#).is_ok());
+        assert!(rune(r#"'\007'"#).is_ok());
+        assert!(rune(r#"'\377'"#).is_ok());
+        assert!(rune(r#"'\x07'"#).is_ok());
+        assert!(rune(r#"'\xff'"#).is_ok());
+        assert!(rune(r#"'\u12e4'"#).is_ok());
+        assert!(rune(r#"'\U00101234'"#).is_ok());
+        assert!(rune(r#"'\''"#).is_ok());
+
+        assert!(rune(r#"'aa'"#).is_err());
+        assert!(rune(r#"'\xa'"#).is_err());
+        assert!(rune(r#"'\0'"#).is_err());
+
+        // TODO: wait for scan_lit_rune check
+        // assert!(rune(r#"'\uDFFF'"#).is_err());
+        // assert!(rune(r#"'\U00110000'"#).is_err());
+    }
 
     #[test]
     fn scan_comment() {
