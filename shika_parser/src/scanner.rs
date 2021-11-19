@@ -203,56 +203,65 @@ impl Scanner {
     fn scan_lit_rune(&mut self) -> Result<String> {
         let mut chars = self.source.chars().skip(self.pos);
         assert_eq!(chars.next(), Some('\''));
-        let mut values = String::from("'");
+        let mut values = vec!['\''];
 
-        match chars.next() {
-            None => return Err(self.error("rune literal not terminated")),
+        let (next1, next2) = (chars.next(), chars.next());
+        next1.is_some().then(|| values.push(next1.unwrap()));
+        next2.is_some().then(|| values.push(next2.unwrap()));
+
+        // must match a valid character or return error
+        let must_be = |ch: Option<char>, valid: fn(char) -> bool| match ch {
+            Some(ch) if valid(ch) => Ok(ch),
+            Some(_) => Err(self.error("illegal rune literal")),
+            None => Err(self.error("rune literal not terminated")),
+        };
+
+        // take exactly N valid chatacter
+        let mut match_n = |n, valid| {
+            (0..)
+                .take(n)
+                .map(|_| must_be(chars.next(), valid))
+                .collect::<Result<Vec<char>>>()
+        };
+
+        match next1 {
             Some('\\') => {
-                values.push('\\');
-                match chars.next() {
-                    Some(ch @ ('a' | 'b' | 'f' | 'n' | 'r' | 't' | 'v' | '\\' | '\'' | '"')) => {
-                        values.push(ch);
-                    }
-                    Some(k @ ('x' | 'u' | 'U')) => {
-                        for _ in 0..match k {
-                            'x' => 2,
-                            'u' => 4,
-                            'U' => 8,
-                            _ => unreachable!(),
-                        } {
-                            values.push(match chars.next() {
-                                Some(ch) if is_hex_digit(ch) => ch,
-                                Some(_) => return Err(self.error("illegal rune literal")),
-                                None => return Err(self.error("rune literal not terminated")),
-                            });
-                        }
-                    }
-                    Some(ch) if is_octal_digit(ch) => {
-                        values.push(ch);
-                        for _ in 0..2 {
-                            values.push(match chars.next() {
-                                Some(ch) if is_hex_digit(ch) => ch,
-                                Some(_) => return Err(self.error("illegal rune literal")),
-                                None => return Err(self.error("rune literal not terminated")),
-                            });
-                        }
-                    }
+                match next2 {
+                    Some('x') => values.extend(match_n(2, is_hex_digit)?),
+                    Some('u') => values.extend(match_n(4, is_hex_digit)?),
+                    Some('U') => values.extend(match_n(8, is_hex_digit)?),
+                    Some('a' | 'b' | 'f' | 'n' | 'r' | 't' | 'v' | '\\' | '\'' | '"') => {}
+                    Some(ch) if is_octal_digit(ch) => values.extend(match_n(2, is_octal_digit)?),
                     Some(_) => return Err(self.error("unknown escape sequence")),
                     None => return Err(self.error("rune literal not terminated")),
-                }
+                };
+                // expect last `'` for escape sequence
+                values.extend(match_n(1, |c| c == '\'')?)
             }
-            Some(ch) if is_unicode_char(ch) => values.push(ch),
-            Some(_) => return Err(self.error("illegal rune literal")),
+            // nexe2 has been pushed at the beginning
+            // we will assert it in the end
+            Some(ch) if is_unicode_char(ch) => {}
+            elsech @ _ => must_be(elsech, |_| false).map(|_| ())?,
         }
 
-        match chars.next() {
-            Some(ch) if ch == '\'' => { /*ok*/ }
-            Some(_) => return Err(self.error("illegal rune literal")),
-            None => return Err(self.error("rune literal not terminated")),
+        // check escape sequence for valid unicode code point
+        if let Some(radix) = match values.get(1..3) {
+            Some(['\\', 'x' | 'u' | 'U']) => Some(16),
+            Some(['\\', n]) if is_octal_digit(*n) => Some(8),
+            _ => None,
+        } {
+            // a valid rust char must be a valid go rune
+            // hence we do not check char ranges
+            // see comment for `is_unicode_char`
+            char::from_u32(
+                u32::from_str_radix(&String::from_iter(&values[3..values.len() - 1]), radix)
+                    .expect("here must be a valid u32"),
+            )
+            .ok_or(self.error("invalid Unicode code point"))?;
         }
 
-        // TODO: check valid Unicode code point, surrogate pairs
-        Ok(values)
+        must_be(values.last().map(|&c| c), |ch| ch == '\'')?;
+        Ok(String::from_iter(values))
     }
 
     fn scan_lit_string(&mut self) -> String {
@@ -329,7 +338,7 @@ fn is_hex_digit(c: char) -> bool {
 
 #[cfg(test)]
 mod test {
-    use crate::scanner::Scanner;
+    use super::Scanner;
 
     #[test]
     fn scan_lit_rune() {
@@ -350,10 +359,8 @@ mod test {
         assert!(rune(r#"'aa'"#).is_err());
         assert!(rune(r#"'\xa'"#).is_err());
         assert!(rune(r#"'\0'"#).is_err());
-
-        // TODO: wait for scan_lit_rune check
-        // assert!(rune(r#"'\uDFFF'"#).is_err());
-        // assert!(rune(r#"'\U00110000'"#).is_err());
+        assert!(rune(r#"'\uDFFF'"#).is_err());
+        assert!(rune(r#"'\U00110000'"#).is_err());
     }
 
     #[test]
