@@ -33,7 +33,7 @@ pub enum Error {
     Else {
         path: PathBuf,
         location: (usize, usize),
-        reason: &'static str,
+        reason: String,
     },
 }
 
@@ -161,13 +161,13 @@ impl Parser {
         }
     }
 
-    fn else_error(&self, pos: Pos, reason: &'static str) -> Error {
+    fn else_error<S: AsRef<str>>(&self, pos: Pos, reason: S) -> Error {
         let path = self.path.clone();
         let location = self.scan.line_info(pos);
         Error::Else {
             path,
             location,
-            reason,
+            reason: reason.as_ref().to_string(),
         }
     }
 

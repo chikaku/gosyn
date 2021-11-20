@@ -3,6 +3,7 @@ use crate::token::Token;
 use crate::{Keyword, LitKind};
 use std::collections::VecDeque;
 use std::fmt::{Debug, Formatter};
+use std::ops::Add;
 use std::str::FromStr;
 use unic_ucd_category::GeneralCategory;
 
@@ -11,7 +12,7 @@ pub type PosTok = (Pos, Token);
 
 pub struct Error {
     pub pos: Pos,
-    pub reason: &'static str,
+    pub reason: String,
 }
 
 impl Debug for Error {
@@ -58,10 +59,17 @@ impl Scanner {
         self.lines.push(line_start);
     }
 
-    fn error(&self, reason: &'static str) -> Error {
+    fn error<S: AsRef<str>>(&self, reason: S) -> Error {
         Error {
-            reason,
             pos: self.pos,
+            reason: reason.as_ref().to_string(),
+        }
+    }
+
+    fn error_at<S: AsRef<str>>(&self, pos: usize, reason: S) -> Error {
+        Error {
+            pos,
+            reason: reason.as_ref().to_string(),
         }
     }
 
@@ -168,7 +176,7 @@ impl Scanner {
         Ok(match ch {
             '"' | '`' => Some((
                 current,
-                Token::Literal(LitKind::String, self.scan_lit_string()),
+                Token::Literal(LitKind::String, self.scan_lit_string()?),
             )),
             '\'' => Some((
                 current,
@@ -200,23 +208,18 @@ impl Scanner {
             .collect()
     }
 
-    fn scan_lit_rune(&mut self) -> Result<String> {
-        let mut chars = self.source.chars().skip(self.pos);
-        assert_eq!(chars.next(), Some('\''));
-        let mut values = vec!['\''];
-
+    fn scan_rune(&mut self, pos: usize) -> Result<String> {
+        let mut chars = self.source.chars().skip(pos);
         let (next1, next2) = (chars.next(), chars.next());
-        next1.is_some().then(|| values.push(next1.unwrap()));
-        next2.is_some().then(|| values.push(next2.unwrap()));
 
-        // must match a valid character or return error
+        // must match a valid character
         let must_be = |ch: Option<char>, valid: fn(char) -> bool| match ch {
             Some(ch) if valid(ch) => Ok(ch),
             Some(_) => Err(self.error("illegal rune literal")),
-            None => Err(self.error("rune literal not terminated")),
+            None => Err(self.error("literal not terminated")),
         };
 
-        // take exactly N valid chatacter
+        // take exactly N valid character
         let mut match_n = |n, valid| {
             (0..)
                 .take(n)
@@ -224,57 +227,80 @@ impl Scanner {
                 .collect::<Result<Vec<char>>>()
         };
 
-        match next1 {
-            Some('\\') => {
-                match next2 {
-                    Some('x') => values.extend(match_n(2, is_hex_digit)?),
-                    Some('u') => values.extend(match_n(4, is_hex_digit)?),
-                    Some('U') => values.extend(match_n(8, is_hex_digit)?),
-                    Some('a' | 'b' | 'f' | 'n' | 'r' | 't' | 'v' | '\\' | '\'' | '"') => {}
-                    Some(ch) if is_octal_digit(ch) => values.extend(match_n(2, is_octal_digit)?),
-                    Some(_) => return Err(self.error("unknown escape sequence")),
-                    None => return Err(self.error("rune literal not terminated")),
-                };
-                // expect last `'` for escape sequence
-                values.extend(match_n(1, |c| c == '\'')?)
-            }
-            // nexe2 has been pushed at the beginning
-            // we will assert it in the end
-            Some(ch) if is_unicode_char(ch) => {}
-            elsech @ _ => must_be(elsech, |_| false).map(|_| ())?,
-        }
+        // return normal character and error directly
+        let es_sequence = match next1 {
+            Some('\\') => match next2 {
+                Some('x') => match_n(2, is_hex_digit)?,
+                Some('u') => match_n(4, is_hex_digit)?,
+                Some('U') => match_n(8, is_hex_digit)?,
+                Some(ch) if is_octal_digit(ch) => match_n(2, is_octal_digit)?,
+                Some(ch) if is_escaped_char(ch) => return Ok(format!("\\{}", ch)),
+                Some(_) => return Err(self.error("unknown escape sequence")),
+                None => return Err(self.error("literal not terminated")),
+            },
+            Some(ch) if is_unicode_char(ch) => return Ok(String::from(ch)),
+            None => return Err(self.error_at(pos, "literal not terminated")),
+            Some(_) => return Err(self.error_at(pos, "unexpected character")),
+        };
 
-        // check escape sequence for valid unicode code point
-        if let Some(radix) = match values.get(1..3) {
-            Some(['\\', 'x' | 'u' | 'U']) => Some(16),
-            Some(['\\', n]) if is_octal_digit(*n) => Some(8),
-            _ => None,
-        } {
+        let es_sequence = [vec![next1.unwrap(), next2.unwrap()], es_sequence].concat();
+        match es_sequence.get(1).unwrap() {
+            'x' | 'u' | 'U' => Some((16, &es_sequence[2..])),
+            _ => Some((8, &es_sequence[1..])), // here must be octal_digit
+        }
+        .and_then(|(radix, sequence)| {
             // a valid rust char must be a valid go rune
             // hence we do not check char ranges
             // see comment for `is_unicode_char`
             char::from_u32(
-                u32::from_str_radix(&String::from_iter(&values[3..values.len() - 1]), radix)
+                u32::from_str_radix(&String::from_iter(sequence), radix)
                     .expect("here must be a valid u32"),
             )
-            .ok_or(self.error("invalid Unicode code point"))?;
-        }
+        })
+        .ok_or(self.error("invalid Unicode code point"))?;
 
-        must_be(values.last().map(|&c| c), |ch| ch == '\'')?;
-        Ok(String::from_iter(values))
+        Ok(es_sequence.iter().collect())
     }
 
-    fn scan_lit_string(&mut self) -> String {
-        let mut chars = self.source.chars().skip(self.pos);
-        let ch0 = chars.nth(0).unwrap();
-        assert!(ch0 == '"' || ch0 == '`');
+    fn scan_lit_rune(&mut self) -> Result<String> {
+        let start_at = self.pos;
+        assert_eq!(self.source.get(start_at..start_at + 1), Some("'"));
+        let rune = self.scan_rune(start_at + 1)?;
+        let next = start_at + 1 + rune.len();
+        match self.source.get(next..next + 1) {
+            Some("'") => Ok(format!("'{}'", rune)),
+            Some(_) => Err(self.error_at(next, "rune literal expect termination")),
+            None => Err(self.error_at(next, "rune literal not termination")),
+        }
+    }
 
-        // let chars = chars.skip(1);
-        let lit = chars.take_while(|&ch| ch != ch0).collect::<String>();
-        let mut chars = self.source.chars().skip(self.pos + lit.len() + 1);
-        assert_eq!(chars.next(), Some(ch0));
+    fn scan_lit_string(&mut self) -> Result<String> {
+        let quote = self.source.chars().skip(self.pos).next().unwrap();
+        let lit = match quote {
+            '`' => self
+                .source
+                .chars()
+                .skip(self.pos + 1)
+                .take_while(|&ch| ch != '`' && (is_unicode_char(ch) || is_newline(ch)))
+                .collect::<String>(),
+            '"' => {
+                let mut index = self.pos + 1;
+                let mut lit = String::new();
+                while self.source.chars().skip(index).next() != Some('"') {
+                    let rune = self.scan_rune(index)?;
+                    index += rune.chars().count();
+                    lit = lit.add(rune.as_str());
+                }
+                lit
+            }
+            _ => unreachable!(),
+        };
 
-        format!("{}{}{}", ch0, lit, ch0)
+        let offset = self.pos + 1 + lit.chars().count();
+        match self.source.chars().skip(offset).next() {
+            Some(next) if next == quote => Ok(format!("{}{}{}", quote, lit, quote)),
+            _ => Err(self.error_at(offset, "string literal not terminated")),
+        }
     }
 
     /// Scan line comment from `//` to `\n`
@@ -290,10 +316,7 @@ impl Scanner {
     fn scan_general_comment(&mut self) -> Result<String> {
         assert_eq!("/*", &self.source[self.pos..self.pos + 2]);
         match self.source[self.pos..].find("*/") {
-            None => Err(Error {
-                pos: self.pos,
-                reason: "comment no termination '*/'",
-            }),
+            None => Err(self.error("comment no termination '*/'")),
             Some(pos) => {
                 let end = self.pos + pos + 2;
                 let comments = self.source.get(self.pos..end).unwrap().to_string();
@@ -313,7 +336,11 @@ impl Scanner {
 /// go's `unicode_char` is an arbitrary Unicode code point except newline
 /// but rust's char is a [unicode scalar value](https://www.unicode.org/glossary/#unicode_scalar_value)
 fn is_unicode_char(c: char) -> bool {
-    c != '\n'
+    !is_newline(c)
+}
+
+fn is_newline(c: char) -> bool {
+    c == '\u{000A}'
 }
 
 fn is_unicode_letter(c: char) -> bool {
@@ -334,6 +361,10 @@ fn is_octal_digit(c: char) -> bool {
 
 fn is_hex_digit(c: char) -> bool {
     c.is_ascii_hexdigit()
+}
+
+fn is_escaped_char(c: char) -> bool {
+    ['a', 'b', 'f', 'n', 'r', 't', 'v', '\\', '\'', '"'].contains(&c)
 }
 
 #[cfg(test)]
@@ -361,6 +392,23 @@ mod test {
         assert!(rune(r#"'\0'"#).is_err());
         assert!(rune(r#"'\uDFFF'"#).is_err());
         assert!(rune(r#"'\U00110000'"#).is_err());
+    }
+
+    #[test]
+    fn scan_lit_string() {
+        let lit_str = |s| Scanner::new(s).scan_lit_string();
+
+        assert!(lit_str("`abc`").is_ok());
+        assert!(lit_str("`\\n\n\\n`").is_ok());
+        assert!(lit_str(r#""\n""#).is_ok());
+        assert!(lit_str(r#""\"""#).is_ok());
+        assert!(lit_str(r#""Hello, world!\n""#).is_ok());
+        assert!(lit_str(r#""日本語""#).is_ok());
+        assert!(lit_str(r#""\u65e5本\U00008a9e""#).is_ok());
+        assert!(lit_str(r#""\xff\u00FF""#).is_ok());
+
+        assert!(lit_str(r#""\uD800""#).is_err());
+        assert!(lit_str(r#""\U00110000""#).is_err());
     }
 
     #[test]
@@ -396,13 +444,5 @@ mod test {
         assert_eq!(scanner.line_info(5), (1, 5));
         assert_eq!(scanner.line_info(20), (2, 0));
         assert_eq!(scanner.line_info(50), (3, 20));
-    }
-
-    #[test]
-    fn scan_lit_string() {
-        let mut scanner = Scanner::new("\"123\"`2312\n123\"123`");
-        assert_eq!(&scanner.scan_lit_string(), "\"123\"");
-        scanner.pos += 5;
-        assert_eq!(&scanner.scan_lit_string(), "`2312\n123\"123`");
     }
 }
