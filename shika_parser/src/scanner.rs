@@ -66,6 +66,10 @@ impl Scanner {
         }
     }
 
+    fn next1_char(&mut self, n: usize) -> Option<char> {
+        self.source.chars().skip(self.pos + n).next().to_owned()
+    }
+
     fn error_at<S: AsRef<str>>(&self, pos: usize, reason: S) -> Error {
         Error {
             pos,
@@ -165,6 +169,7 @@ impl Scanner {
             }
         }
 
+        // TODO: . may be the prefix of float_lit
         let ch = match self.source.get(self.pos..self.pos + 1) {
             None => return Ok(None),
             Some(next1) => match Operator::from_str(next1).ok() {
@@ -193,8 +198,40 @@ impl Scanner {
                     },
                 ))
             }
+            ch if ch.is_ascii_digit() => {
+                let (kind, value) = self.scan_lit_number()?;
+                Some((current, Token::Literal(kind, value)))
+            }
             _ => None,
         })
+    }
+
+    /// Scan line comment from `//` to `\n`
+    fn scan_line_comment(&mut self) -> String {
+        self.source
+            .chars()
+            .skip(self.pos)
+            .take_while(|&ch| ch != '\n')
+            .collect()
+    }
+
+    /// Scan general comment from `/*` to `*/`
+    fn scan_general_comment(&mut self) -> Result<String> {
+        assert_eq!("/*", &self.source[self.pos..self.pos + 2]);
+        match self.source[self.pos..].find("*/") {
+            None => Err(self.error("comment no termination '*/'")),
+            Some(pos) => {
+                let end = self.pos + pos + 2;
+                let comments = self.source.get(self.pos..end).unwrap().to_string();
+                for (index, ch) in comments.chars().enumerate() {
+                    if ch == '\n' {
+                        self.add_line(self.pos + index + 1)
+                    }
+                }
+
+                Ok(comments)
+            }
+        }
     }
 
     /// scan an identify
@@ -303,31 +340,127 @@ impl Scanner {
         }
     }
 
-    /// Scan line comment from `//` to `\n`
-    fn scan_line_comment(&mut self) -> String {
+    fn scan_digits(&mut self, n: usize, valid: fn(char) -> bool) -> String {
         self.source
             .chars()
-            .skip(self.pos)
-            .take_while(|&ch| ch != '\n')
+            .skip(self.pos + n)
+            .scan(true, |state, item| {
+                (item != '_' || *state).then(|| {
+                    *state = item != '_';
+                    item
+                })
+            })
+            .take_while(|&ch| ch == '_' || valid(ch))
             .collect()
     }
 
-    /// Scan general comment from `/*` to `*/`
-    fn scan_general_comment(&mut self) -> Result<String> {
-        assert_eq!("/*", &self.source[self.pos..self.pos + 2]);
-        match self.source[self.pos..].find("*/") {
-            None => Err(self.error("comment no termination '*/'")),
-            Some(pos) => {
-                let end = self.pos + pos + 2;
-                let comments = self.source.get(self.pos..end).unwrap().to_string();
-                for (index, ch) in comments.chars().enumerate() {
-                    if ch == '\n' {
-                        self.add_line(self.pos + index + 1)
-                    }
-                }
+    fn scan_lit_number(&mut self) -> Result<(LitKind, String)> {
+        let chars = self.source.chars().skip(self.pos);
+        let next2 = chars.take(2).collect::<String>().to_owned();
 
-                Ok(comments)
-            }
+        // integer part
+        let (radix, int_part) = self
+            .next1_char(0)
+            .and_then(|ch| match ch {
+                '.' => None,
+                _ => Some(match next2.as_str() {
+                    "0b" | "oB" => (2, next2 + &self.scan_digits(2, is_binary_digit)),
+                    "0o" | "0O" => (8, next2 + &self.scan_digits(2, is_decimal_digit)),
+                    "0x" | "0X" => (16, next2 + &self.scan_digits(2, is_hex_digit)),
+                    _ => (10, self.scan_digits(0, is_decimal_digit)),
+                }),
+            })
+            .unwrap_or((10, String::new()));
+
+        if int_part.ends_with("_") {
+            return Err(self.error_at(
+                self.pos + int_part.len(),
+                "'_' must separate successive digits",
+            ));
+        }
+
+        let skipped = int_part.len();
+        let fac_part = (self.next1_char(skipped) == Some('.'))
+            .then(|| match radix {
+                2 | 8 => Err(self.error_at(self.pos + skipped, "invalid radix point")),
+                16 => Ok(".".to_owned() + &self.scan_digits(skipped + 1, is_hex_digit)),
+                _ => Ok(".".to_owned() + &self.scan_digits(skipped + 1, is_decimal_digit)),
+            })
+            .unwrap_or(Ok(String::new()))?;
+
+        if fac_part.starts_with("._") || fac_part.ends_with("_") {
+            return Err(self.error_at(self.pos + skipped, "'_' must separate successive digits"));
+        }
+
+        let next1 = self.next1_char(skipped);
+        let mut skipped = skipped + fac_part.len();
+        if int_part.len() + fac_part.len() == 0 {
+            return Err(self.error_at(self.pos + skipped, "invalid radix point"));
+        } else if radix == 16 && (int_part.len() == 2) && (fac_part.len() == 1) {
+            return Err(self.error_at(self.pos + skipped, "mantissa has no digits"));
+        } else if matches!(next1, Some('e' | 'E')) && radix != 10 {
+            return Err(self.error_at(self.pos + skipped, "E exponent requires decimal mantissa"));
+        } else if matches!(next1, Some('p' | 'P')) && radix != 16 {
+            return Err(self.error_at(
+                self.pos + skipped,
+                "P exponent requires hexadecimal mantissa",
+            ));
+        };
+
+        let exp_part = self
+            .next1_char(skipped)
+            .and_then(|exp| {
+                matches!(exp, 'e' | 'E' | 'p' | 'P').then(|| {
+                    (match self.next1_char(skipped + 1) {
+                        Some(signed @ ('+' | '-')) => {
+                            skipped += 2;
+                            format!("{}{}", exp, signed)
+                        }
+                        _ => {
+                            skipped += 1;
+                            format!("{}", exp)
+                        }
+                    }) + &self.scan_digits(
+                        skipped,
+                        if radix == 16 {
+                            is_hex_digit
+                        } else {
+                            is_decimal_digit
+                        },
+                    )
+                })
+            })
+            .unwrap_or(String::new());
+
+        if radix == 16 && fac_part.len() > 0 && exp_part.len() == 0 {
+            return Err(self.error_at(
+                self.pos + skipped + exp_part.len(),
+                "mantissa has no digits",
+            ));
+        }
+
+        if exp_part
+            .chars()
+            .skip(1) // skip e|E|p|P
+            .skip_while(|&ch| ch == '+' || ch == '-')
+            .next()
+            == Some('_')
+            || exp_part.ends_with("_")
+        {
+            return Err(self.error_at(
+                self.pos + skipped + exp_part.len(),
+                "'_' must separate successive digits",
+            ));
+        }
+
+        skipped += exp_part.len();
+        let num_part = [int_part, fac_part, exp_part].concat();
+        if self.next1_char(skipped) == Some('i') {
+            Ok((LitKind::Imag, num_part + "i"))
+        } else if num_part.find('.').is_some() {
+            Ok((LitKind::Float, num_part))
+        } else {
+            Ok((LitKind::Integer, num_part))
         }
     }
 }
@@ -355,12 +488,20 @@ fn is_letter(c: char) -> bool {
     is_unicode_letter(c) || c == '_'
 }
 
+fn is_binary_digit(c: char) -> bool {
+    matches!(c, '0'..='1')
+}
+
 fn is_octal_digit(c: char) -> bool {
     matches!(c, '0'..='7')
 }
 
+fn is_decimal_digit(c: char) -> bool {
+    matches!(c, '0'..='9')
+}
+
 fn is_hex_digit(c: char) -> bool {
-    c.is_ascii_hexdigit()
+    matches!(c, '0'..='9' | 'a'..='f' | 'A'..='F')
 }
 
 fn is_escaped_char(c: char) -> bool {
@@ -370,6 +511,68 @@ fn is_escaped_char(c: char) -> bool {
 #[cfg(test)]
 mod test {
     use super::Scanner;
+
+    #[test]
+    fn scan_lit_number() {
+        let numeric = |s| Scanner::new(s).scan_lit_number();
+        assert!(numeric("42").is_ok());
+        assert!(numeric("4_2").is_ok());
+        assert!(numeric("0600").is_ok());
+        assert!(numeric("0_600").is_ok());
+        assert!(numeric("0o600").is_ok());
+        assert!(numeric("0O600").is_ok());
+        assert!(numeric("0xBadFace").is_ok());
+        assert!(numeric("0xBad_Face").is_ok());
+        assert!(numeric("0x_67_7a_2f_cc_40_c6").is_ok());
+        assert!(numeric("170141183460469231731687303715884105727").is_ok());
+        assert!(numeric("170_141183_460469_231731_687303_715884_105727").is_ok());
+
+        assert!(numeric("42_").is_err());
+        assert!(numeric("4__2").is_err());
+        assert!(numeric("0_xBadFace").is_err());
+
+        assert!(numeric("0.").is_ok());
+        assert!(numeric("72.40").is_ok());
+        assert!(numeric("072.40").is_ok());
+        assert!(numeric("2.71828").is_ok());
+        assert!(numeric("1.e+0").is_ok());
+        assert!(numeric("6.67428e-11").is_ok());
+        assert!(numeric("1E6").is_ok());
+        assert!(numeric(".25").is_ok());
+        assert!(numeric(".12345E+5").is_ok());
+        assert!(numeric("1_5.").is_ok());
+        assert!(numeric("0.15e+0_2").is_ok());
+
+        assert!(numeric("0x1p-2").is_ok());
+        assert!(numeric("0x2.p10").is_ok());
+        assert!(numeric("0x1.Fp+0").is_ok());
+        assert!(numeric("0X.8p-0").is_ok());
+        assert!(numeric("0X_1FFFP-16").is_ok());
+        assert!(numeric("0x15e-2").is_ok());
+
+        assert!(numeric("0x.p1").is_err());
+        assert!(numeric("1p-2").is_err());
+        assert!(numeric("0x1.5e-2").is_err());
+        assert!(numeric("1_.5").is_err());
+        assert!(numeric("1._5").is_err());
+        assert!(numeric("1.5_e1").is_err());
+        assert!(numeric("1.5e_1").is_err());
+        assert!(numeric("1.5e+_1").is_err());
+        assert!(numeric("1.5e1_").is_err());
+
+        assert!(numeric("0i").is_ok());
+        assert!(numeric("0123i").is_ok());
+        assert!(numeric("0o123i").is_ok());
+        assert!(numeric("0xabci").is_ok());
+        assert!(numeric("0.i").is_ok());
+        assert!(numeric("2.71828i").is_ok());
+        assert!(numeric("1.e+0i").is_ok());
+        assert!(numeric("6.67428e-11i").is_ok());
+        assert!(numeric("1E6i").is_ok());
+        assert!(numeric(".25i").is_ok());
+        assert!(numeric(".12345E+5i").is_ok());
+        assert!(numeric("0x1p-2i ").is_ok());
+    }
 
     #[test]
     fn scan_lit_rune() {

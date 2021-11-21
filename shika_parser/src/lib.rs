@@ -1,3 +1,5 @@
+#![feature(exclusive_range_pattern)]
+
 mod ast;
 mod file_set;
 mod parser;

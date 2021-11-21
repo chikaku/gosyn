@@ -197,10 +197,10 @@ impl From<Operator> for Token {
 impl Token {
     pub fn length(&self) -> usize {
         match self {
-            Token::Comment(text) => text.len(),
-            Token::Keyword(word) => word.to_str().len(),
-            Token::Operator(op) => op.to_str().len(),
-            Token::Literal(_, value) => value.len(),
+            Token::Comment(text) => text.chars().count(),
+            Token::Keyword(word) => word.to_str().chars().count(),
+            Token::Operator(op) => op.to_str().chars().count(),
+            Token::Literal(_, value) => value.chars().count(),
         }
     }
 
