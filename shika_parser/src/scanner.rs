@@ -27,6 +27,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 #[derive(Default)]
 pub struct Scanner {
     pos: usize,
+    length: usize,
     source: String,
     lines: Vec<usize>,
 
@@ -38,6 +39,7 @@ impl Scanner {
     pub fn new<S: AsRef<str>>(source: S) -> Self {
         let mut scan = Self::default();
         scan.source = source.as_ref().into();
+        scan.length = scan.source.chars().count();
         scan
     }
 
@@ -66,8 +68,12 @@ impl Scanner {
         }
     }
 
-    fn next1_char(&mut self, n: usize) -> Option<char> {
-        self.source.chars().skip(self.pos + n).next().to_owned()
+    fn next_char(&mut self, skp: usize) -> Option<char> {
+        self.source.chars().skip(self.pos + skp).next().to_owned()
+    }
+
+    fn next_nchar(&mut self, n: usize) -> String {
+        self.source.chars().skip(self.pos).take(n).collect()
     }
 
     fn error_at<S: AsRef<str>>(&self, pos: usize, reason: S) -> Error {
@@ -132,77 +138,52 @@ impl Scanner {
             return Ok(Some(pos_tok));
         }
 
-        match self.scan_token()? {
-            Some((pos, tok)) => {
+        let current = self.pos;
+        Ok(match current >= self.length {
+            true => None,
+            false => {
+                let tok = self.scan_token()?;
                 self.pos += tok.length();
                 self.prev = Some(tok.clone());
-                Ok(Some((pos, tok)))
+                Some((current, tok))
             }
-            None => Ok(None),
-        }
+        })
     }
 
-    /// return next Token and position
-    pub fn scan_token(&mut self) -> Result<Option<PosTok>> {
-        let current = self.pos;
-
-        // scan 3 char
-        if let Some(next3) = self.source.get(self.pos..self.pos + 3) {
-            if let Some(tok) = Operator::from_str(next3).ok() {
-                return Ok(Some((current, tok.into())));
-            }
+    /// return next Token
+    pub fn scan_token(&mut self) -> Result<Token> {
+        if let Some(op) = Operator::from_str(&self.next_nchar(3)).ok() {
+            return Ok(op.into());
         }
 
-        if let Some(next2) = self.source.get(self.pos..self.pos + 2) {
-            if matches!(next2, "//") {
-                let comment = self.scan_line_comment();
-                return Ok(Some((current, Token::Comment(comment.trim().to_string()))));
-            }
-
-            if matches!(next2, "/*") {
-                let comment = self.scan_general_comment()?;
-                return Ok(Some((current, Token::Comment(comment))));
-            }
-
-            if let Some(tok) = Operator::from_str(next2).ok() {
-                return Ok(Some((current, tok.into())));
-            }
+        if let Some(tok) = match self.next_nchar(2).as_str() {
+            "//" => Some(Token::Comment(self.scan_line_comment())),
+            "/*" => Some(Token::Comment(self.scan_general_comment()?)),
+            two => Operator::from_str(two).ok().map(|op| op.into()),
+        } {
+            return Ok(tok);
         }
 
-        // TODO: . may be the prefix of float_lit
-        let ch = match self.source.get(self.pos..self.pos + 1) {
-            None => return Ok(None),
-            Some(next1) => match Operator::from_str(next1).ok() {
-                Some(tok) => return Ok(Some((current, tok.into()))),
-                None => next1.chars().nth(0).unwrap(),
-            },
-        };
+        // caller make sure here is at least one character
+        let next0_char = self.next_char(0).unwrap();
+        let next1_is_digits = matches!(self.next_char(1), Some('0'..'9'));
+        let next0_char_op = Operator::from_str(&next0_char.to_string()).ok();
 
-        Ok(match ch {
-            '"' | '`' => Some((
-                current,
-                Token::Literal(LitKind::String, self.scan_lit_string()?),
-            )),
-            '\'' => Some((
-                current,
-                Token::Literal(LitKind::Char, self.scan_lit_rune()?),
-            )),
+        Ok(match next0_char {
+            '0'..'9' | '.' if next1_is_digits => self.scan_lit_number()?,
+            '\'' => Token::Literal(LitKind::Char, self.scan_lit_rune()?),
+            '"' | '`' => Token::Literal(LitKind::String, self.scan_lit_string()?),
             ch if is_letter(ch) => {
-                // see https://golang.org/ref/spec#Characters
                 let identify = self.scan_identify();
-                Some((
-                    current,
-                    match Keyword::from_str(&identify) {
-                        Ok(word) => Token::Keyword(word),
-                        _ => Token::Literal(LitKind::Ident, identify),
-                    },
-                ))
+                match Keyword::from_str(&identify) {
+                    Ok(word) => Token::Keyword(word),
+                    _ => Token::Literal(LitKind::Ident, identify),
+                }
             }
-            ch if ch.is_ascii_digit() => {
-                let (kind, value) = self.scan_lit_number()?;
-                Some((current, Token::Literal(kind, value)))
-            }
-            _ => None,
+            other => match next0_char_op {
+                Some(op) => op.into(),
+                _ => return Err(self.error(format!("unresolved character {:?}", other))),
+            },
         })
     }
 
@@ -354,13 +335,13 @@ impl Scanner {
             .collect()
     }
 
-    fn scan_lit_number(&mut self) -> Result<(LitKind, String)> {
+    fn scan_lit_number(&mut self) -> Result<Token> {
         let chars = self.source.chars().skip(self.pos);
         let next2 = chars.take(2).collect::<String>().to_owned();
 
         // integer part
         let (radix, int_part) = self
-            .next1_char(0)
+            .next_char(0)
             .and_then(|ch| match ch {
                 '.' => None,
                 _ => Some(match next2.as_str() {
@@ -380,7 +361,7 @@ impl Scanner {
         }
 
         let skipped = int_part.len();
-        let fac_part = (self.next1_char(skipped) == Some('.'))
+        let fac_part = (self.next_char(skipped) == Some('.'))
             .then(|| match radix {
                 2 | 8 => Err(self.error_at(self.pos + skipped, "invalid radix point")),
                 16 => Ok(".".to_owned() + &self.scan_digits(skipped + 1, is_hex_digit)),
@@ -392,8 +373,8 @@ impl Scanner {
             return Err(self.error_at(self.pos + skipped, "'_' must separate successive digits"));
         }
 
-        let next1 = self.next1_char(skipped);
-        let mut skipped = skipped + fac_part.len();
+        let next1 = self.next_char(skipped);
+        let skipped = int_part.len() + fac_part.len();
         if int_part.len() + fac_part.len() == 0 {
             return Err(self.error_at(self.pos + skipped, "invalid radix point"));
         } else if radix == 16 && (int_part.len() == 2) && (fac_part.len() == 1) {
@@ -407,11 +388,12 @@ impl Scanner {
             ));
         };
 
+        let mut skipped = int_part.len() + fac_part.len();
         let exp_part = self
-            .next1_char(skipped)
+            .next_char(skipped)
             .and_then(|exp| {
                 matches!(exp, 'e' | 'E' | 'p' | 'P').then(|| {
-                    (match self.next1_char(skipped + 1) {
+                    (match self.next_char(skipped + 1) {
                         Some(signed @ ('+' | '-')) => {
                             skipped += 2;
                             format!("{}{}", exp, signed)
@@ -455,12 +437,12 @@ impl Scanner {
 
         skipped += exp_part.len();
         let num_part = [int_part, fac_part, exp_part].concat();
-        if self.next1_char(skipped) == Some('i') {
-            Ok((LitKind::Imag, num_part + "i"))
+        if self.next_char(skipped) == Some('i') {
+            Ok(Token::Literal(LitKind::Imag, num_part + "i"))
         } else if num_part.find('.').is_some() {
-            Ok((LitKind::Float, num_part))
+            Ok(Token::Literal(LitKind::Float, num_part))
         } else {
-            Ok((LitKind::Integer, num_part))
+            Ok(Token::Literal(LitKind::Integer, num_part))
         }
     }
 }
