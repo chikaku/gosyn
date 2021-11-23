@@ -6,7 +6,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use crate::ast;
+use crate::ast::{self, Expression};
 use crate::ast::{ChanMode, VarSpec};
 use crate::scanner::{PosTok, Scanner};
 use crate::token::{Keyword, LitKind, Operator, Token};
@@ -137,6 +137,8 @@ const PERIOD: Token = Token::Operator(Operator::Period);
 const PAREN_LEFT: Token = Token::Operator(Operator::ParenLeft);
 const PAREN_RIGHT: Token = Token::Operator(Operator::ParenRight);
 const SEMI_COLON: Token = Token::Operator(Operator::SemiColon);
+const BARACK_LEFT: Token = Token::Operator(Operator::BarackLeft);
+const BARACK_RIGHT: Token = Token::Operator(Operator::BarackRight);
 const BRACE_LEFT: Token = Token::Operator(Operator::BraceLeft);
 const BRACE_RIGHT: Token = Token::Operator(Operator::BraceRight);
 
@@ -161,7 +163,7 @@ impl Parser {
         }
     }
 
-    fn else_error<S: AsRef<str>>(&self, pos: Pos, reason: S) -> Error {
+    fn else_error_at<S: AsRef<str>>(&self, pos: Pos, reason: S) -> Error {
         let path = self.path.clone();
         let location = self.scan.line_info(pos);
         Error::Else {
@@ -169,6 +171,10 @@ impl Parser {
             location,
             reason: reason.as_ref().to_string(),
         }
+    }
+
+    fn else_error<S: AsRef<str>>(&self, reason: S) -> Error {
+        self.else_error_at(self.scan.position(), reason)
     }
 
     fn expect_next(&mut self, expect: Token) -> Result<()> {
@@ -211,11 +217,11 @@ impl Parser {
         }
     }
 
-    fn expect_pkg_name(&mut self) -> Result<ast::PkgName> {
+    fn expect_pkg_name(&mut self) -> Result<ast::PkgIdent> {
         let id = self.expect_identify()?;
         match id.name.as_str() {
-            BLANK => Err(self.else_error(id.pos, ERR_PKG_NAME_BLANK)),
-            _ => Ok(ast::PkgName(id)),
+            BLANK => Err(self.else_error_at(id.pos, ERR_PKG_NAME_BLANK)),
+            _ => Ok(ast::PkgIdent(id)),
         }
     }
 
@@ -267,6 +273,11 @@ impl Parser {
         }
 
         Ok(pos_tok)
+    }
+
+    fn next_some(&mut self) -> Result<PosTok> {
+        let pos_tok = self.next()?;
+        pos_tok.ok_or(self.else_error("Unexpected EOF"))
     }
 
     pub fn run(&mut self) -> Result<ast::File> {
@@ -398,7 +409,7 @@ impl Parser {
         let (pos, tok) = self.expect_some()?;
         match tok {
             Token::Literal(LitKind::Ident, name) if &name != BLANK => {
-                let id0 = ast::PkgName(ast::Ident { pos, name });
+                let id0 = ast::PkgIdent(ast::Ident { pos, name });
                 match self.forward_matched(PERIOD)? {
                     false => Ok(ast::Type::Named(id0.into())),
                     true => Ok(ast::Type::PkgNamed(id0, self.expect_identify()?)),
@@ -429,7 +440,7 @@ impl Parser {
             CHAN => {
                 let ch_mode = match self.forward_matched(ARROW)? {
                     true => ChanMode::Send,
-                    false => ChanMode::None,
+                    false => ChanMode::Double,
                 };
 
                 let ch_type = Box::new(self.parse_type()?);
@@ -442,6 +453,77 @@ impl Parser {
             STAR => Ok(ast::Type::Pointer(Box::new(self.parse_type()?))),
             _ => unimplemented!(), // TODO: raise error
         }
+    }
+
+    pub fn parse_expr(&mut self) -> Result<ast::Expression> {
+        self.parse_binary_expr()
+    }
+
+    fn parse_binary_expr(&mut self) -> Result<ast::Expression> {
+        self.parse_unary_expr()
+    }
+
+    fn parse_unary_expr(&mut self) -> Result<ast::Expression> {
+        let (pos, tok) = self.next_some()?;
+        match tok {
+            Token::Operator(
+                op
+                @ (Operator::Add | Operator::Sub | Operator::Not | Operator::Xor | Operator::And),
+            ) => Ok(ast::Expression::Unary {
+                pos,
+                operator: op,
+                operand: Box::new(self.parse_unary_expr()?),
+            }),
+            Token::Operator(op @ Operator::Arrow) => {
+                // TODO: handle <- chan int(nil)
+                Ok(Expression::Invalid)
+            }
+            Token::Operator(Operator::Mul) => Ok(Expression::Star {
+                pos,
+                right: Box::new(self.parse_unary_expr()?),
+            }),
+            _ => {
+                self.rewind(Some((pos, tok)));
+                self.parse_primary_expr()
+            }
+        }
+    }
+
+    fn parse_primary_expr(&mut self) -> Result<ast::Expression> {
+        let operand = self.parse_operand()?;
+        match self.next()? {
+            Some((_, PERIOD)) => match self.next_some()? {
+                // TODO: check type or expr
+                (pos, Token::Literal(LitKind::Ident, name)) => Ok(Expression::Selector {
+                    left: Box::new(operand),
+                    right: ast::Ident { pos, name },
+                }),
+                // TODO: check type
+                (_, PAREN_LEFT) => {
+                    let typ = match self.forward_matched(TYPE)? {
+                        true => None, // a.(type)
+                        false => Some(self.parse_type()?),
+                    };
+
+                    self.expect_next(PAREN_RIGHT)?;
+                    Ok(Expression::TypeAssert {
+                        left: Box::new(operand),
+                        assert: Box::new(typ),
+                    })
+                }
+                _ => Err(self.else_error("expect selector or type assertion")),
+            },
+            // Some((_, BARACK_LEFT)) => {}
+            // Some((_, PAREN_LEFT)) => {}
+            // Some((_, BRACE_LEFT)) => {}
+            _ => unimplemented!(),
+        };
+
+        Ok(Expression::Invalid)
+    }
+
+    fn parse_operand(&mut self) -> Result<ast::Expression> {
+        Ok(Expression::Invalid)
     }
 }
 

@@ -1,4 +1,5 @@
 use crate::LitKind;
+use crate::Operator;
 use crate::Pos;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -16,12 +17,30 @@ pub struct Ident {
 }
 
 #[derive(Default)]
-pub struct PkgName(pub Ident);
+pub struct PkgIdent(pub Ident);
 
-impl Into<Ident> for PkgName {
+impl Into<Ident> for PkgIdent {
     fn into(self) -> Ident {
         self.0
     }
+}
+
+#[derive(Default)]
+pub struct File {
+    pub path: PathBuf,
+    pub line_info: Vec<usize>,
+
+    pub name: PkgIdent,
+    pub comments: Vec<Rc<Comment>>,
+    pub document: Vec<Rc<Comment>>,
+    pub imports: Vec<Import>,
+}
+
+#[derive(Default, Debug)]
+pub struct Import {
+    pub docs: Vec<Rc<Comment>>,
+    pub name: Option<Ident>,
+    pub path: StringLit,
 }
 
 pub struct BasicLit {
@@ -46,19 +65,31 @@ impl Into<StringLit> for BasicLit {
     }
 }
 
-#[derive(Default, Debug)]
-pub struct Import {
-    pub docs: Vec<Rc<Comment>>,
-    pub name: Option<Ident>,
-    pub path: StringLit,
+pub enum Expression {
+    Invalid,
+    Unary {
+        pos: usize,
+        operator: Operator,
+        operand: Box<Expression>,
+    },
+    Star {
+        pos: usize,
+        right: Box<Expression>,
+    },
+    Selector {
+        left: Box<Expression>,
+        right: Ident,
+    },
+    TypeAssert {
+        left: Box<Expression>,
+        assert: Box<Option<Type>>,
+    },
 }
-
-pub enum Expression {}
 
 #[allow(dead_code)]
 pub enum Type {
-    Named(Ident),             // T
-    PkgNamed(PkgName, Ident), // p.T
+    Named(Ident),              // T
+    PkgNamed(PkgIdent, Ident), // p.T
 
     Map(Box<Type>, Box<Type>),    // map[K]V
     Array(Box<Type>, Expression), // [N]T
@@ -72,7 +103,7 @@ pub enum Type {
 }
 
 pub enum ChanMode {
-    None,
+    Double,
     Send,
     Receive,
 }
@@ -88,15 +119,4 @@ pub struct VarSpec {
 #[allow(dead_code)]
 pub enum Declaration {
     Var(Vec<VarSpec>),
-}
-
-#[derive(Default)]
-pub struct File {
-    pub path: PathBuf,
-    pub line_info: Vec<usize>,
-
-    pub name: PkgName,
-    pub comments: Vec<Rc<Comment>>,
-    pub document: Vec<Rc<Comment>>,
-    pub imports: Vec<Import>,
 }

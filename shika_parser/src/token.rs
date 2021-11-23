@@ -98,13 +98,13 @@ pub enum Operator {
     #[enum_from(str = ")")]
     ParenRight,
     #[enum_from(str = "[")]
-    BraceLeft,
-    #[enum_from(str = "]")]
-    BraceRight,
-    #[enum_from(str = "{")]
     BarackLeft,
-    #[enum_from(str = "}")]
+    #[enum_from(str = "]")]
     BarackRight,
+    #[enum_from(str = "{")]
+    BraceLeft,
+    #[enum_from(str = "}")]
+    BraceRight,
 
     #[enum_from(str = ",")]
     Comma,
