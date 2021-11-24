@@ -608,17 +608,17 @@ mod test {
 
     #[test]
     fn scan_line_info() {
-        let code = "package main\n    /*  \n    \n */\n\n    // 123\n\n    ";
+        let code = "package main\n/*\n\n*/\n\n// 123\n\n";
         let mut scanner = Scanner::new(code);
         while let Some(_) = scanner.next_token().unwrap() {}
         let mut lines = scanner.lines.iter();
         assert_eq!(lines.next(), Some(&13));
-        assert_eq!(lines.next(), Some(&22));
-        assert_eq!(lines.next(), Some(&27));
-        assert_eq!(lines.next(), Some(&31));
-        assert_eq!(lines.next(), Some(&32));
-        assert_eq!(lines.next(), Some(&43));
-        assert_eq!(lines.next(), Some(&44));
+        assert_eq!(lines.next(), Some(&16));
+        assert_eq!(lines.next(), Some(&17));
+        assert_eq!(lines.next(), Some(&20));
+        assert_eq!(lines.next(), Some(&21));
+        assert_eq!(lines.next(), Some(&28));
+        assert_eq!(lines.next(), Some(&29));
         assert_eq!(lines.next(), None);
     }
 

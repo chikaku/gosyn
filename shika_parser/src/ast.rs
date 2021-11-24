@@ -16,7 +16,7 @@ pub struct Ident {
     pub name: String,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct PkgIdent(pub Ident);
 
 impl Into<Ident> for PkgIdent {
@@ -43,6 +43,7 @@ pub struct Import {
     pub path: StringLit,
 }
 
+#[derive(Debug)]
 pub struct BasicLit {
     pub pos: usize,
     pub kind: LitKind,
@@ -65,8 +66,19 @@ impl Into<StringLit> for BasicLit {
     }
 }
 
+#[derive(Debug)]
 pub enum Expression {
     Invalid,
+
+    Ident(Ident),
+    BasicLit(BasicLit),
+    Func(),
+
+    Paren {
+        pos: (usize, usize),
+        expr: Box<Expression>,
+    },
+
     Unary {
         pos: usize,
         operator: Operator,
@@ -87,6 +99,7 @@ pub enum Expression {
 }
 
 #[allow(dead_code)]
+#[derive(Debug)]
 pub enum Type {
     Named(Ident),              // T
     PkgNamed(PkgIdent, Ident), // p.T
@@ -102,6 +115,7 @@ pub enum Type {
     Struct(Vec<(Vec<Ident>, Box<Type>)>),
 }
 
+#[derive(Debug)]
 pub enum ChanMode {
     Double,
     Send,
@@ -118,5 +132,9 @@ pub struct VarSpec {
 
 #[allow(dead_code)]
 pub enum Declaration {
-    Var(Vec<VarSpec>),
+    Constant,
+    Variable,
+    Type,
+    Func,
+    Method,
 }

@@ -6,7 +6,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use crate::ast::{self, Expression};
+use crate::ast::{self, BasicLit, Expression, Ident};
 use crate::ast::{ChanMode, VarSpec};
 use crate::scanner::{PosTok, Scanner};
 use crate::token::{Keyword, LitKind, Operator, Token};
@@ -251,11 +251,10 @@ impl Parser {
     }
 
     fn next(&mut self) -> Result<Option<PosTok>> {
-        let mut pos_tok = self.scan.next_token().map_err(|serr| Error::Else {
-            path: self.path.clone(),
-            location: self.scan.line_info(serr.pos),
-            reason: serr.reason,
-        })?;
+        let mut pos_tok = self
+            .scan
+            .next_token()
+            .map_err(|serr| self.else_error_at(serr.pos, serr.reason))?;
 
         while let Some((pos, Token::Comment(text))) = pos_tok {
             let comment = Rc::new(ast::Comment { pos, text });
@@ -265,19 +264,17 @@ impl Parser {
                 self.lead_comments.clear();
             }
 
-            pos_tok = self.scan.next_token().map_err(|serr| Error::Else {
-                path: self.path.clone(),
-                location: self.scan.line_info(serr.pos),
-                reason: serr.reason,
-            })?;
+            pos_tok = self
+                .scan
+                .next_token()
+                .map_err(|serr| self.else_error_at(serr.pos, serr.reason))?;
         }
 
         Ok(pos_tok)
     }
 
     fn next_some(&mut self) -> Result<PosTok> {
-        let pos_tok = self.next()?;
-        pos_tok.ok_or(self.else_error("Unexpected EOF"))
+        self.next()?.ok_or(self.else_error("Unexpected EOF"))
     }
 
     pub fn run(&mut self) -> Result<ast::File> {
@@ -420,8 +417,8 @@ impl Parser {
                 self.expect_next(PAREN_RIGHT)?;
                 return Ok(typ);
             }
-            BRACE_LEFT => {
-                if self.forward_matched(BRACE_RIGHT)? {
+            BARACK_LEFT => {
+                if self.forward_matched(BARACK_RIGHT)? {
                     let elem_type = self.parse_type()?;
                     return Ok(ast::Type::Slice(Box::new(elem_type)));
                 }
@@ -431,9 +428,9 @@ impl Parser {
                 unimplemented!();
             }
             MAP => {
-                self.expect_next(BRACE_LEFT)?;
+                self.expect_next(BARACK_LEFT)?;
                 let key_type = Box::new(self.parse_type()?);
-                self.expect_next(BRACE_RIGHT)?;
+                self.expect_next(BARACK_RIGHT)?;
                 let val_type = Box::new(self.parse_type()?);
                 Ok(ast::Type::Map(key_type, val_type))
             }
@@ -517,44 +514,48 @@ impl Parser {
             // Some((_, PAREN_LEFT)) => {}
             // Some((_, BRACE_LEFT)) => {}
             _ => unimplemented!(),
+        }
+    }
+
+    fn parse_operand(&mut self) -> Result<ast::Expression> {
+        let (pos, tok) = self.next_some()?;
+        match tok {
+            Token::Literal(LitKind::Ident, name) => Expression::Ident(Ident { pos, name }),
+            Token::Literal(kind, value) => Expression::BasicLit(BasicLit { pos, kind, value }),
+            PAREN_LEFT => {
+                // TODO: maybe a type
+                let expr = self.parse_expr()?;
+                self.expect_next(PAREN_RIGHT);
+                Expression::Paren {
+                    pos: (pos, self.scan.position() - 1),
+                    expr: Box::new(expr),
+                }
+            }
+            FUNC => self.parse_func_type()?,
+            _ => unimplemented!(),
         };
 
         Ok(Expression::Invalid)
     }
 
-    fn parse_operand(&mut self) -> Result<ast::Expression> {
+    fn parse_func_type(&mut self) -> Result<ast::Expression> {
+        self.expect_next(FUNC)?;
+        self.expect_next(PAREN_LEFT)?;
+        while !self.forward_matched(PAREN_RIGHT)? {
+            // TODO:
+        }
+
         Ok(Expression::Invalid)
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::parse_file;
+    use std::assert_matches::assert_matches;
+
     use super::Result;
-    use crate::ast::Import;
-    use crate::ast::Type;
-    use crate::parser::{parse_source, Parser};
-
-    #[test]
-    fn parse_package() -> Result<()> {
-        let ast = parse_source("package main")?;
-        assert_eq!(&ast.name.0.name, "main");
-
-        Ok(())
-    }
-
-    #[test]
-    fn parse_type() -> Result<()> {
-        let type_of = |x| Parser::from_str(x).parse_type();
-        assert!(matches!(type_of("int")?, Type::Named(_)));
-        assert!(matches!(type_of("((int))")?, Type::Named(_)));
-        assert!(matches!(type_of("a.b;")?, Type::PkgNamed(..)));
-        assert!(matches!(type_of("[]int;")?, Type::Slice(..)));
-        assert!(matches!(type_of("map[int]map[int]int;")?, Type::Map(..)));
-        assert!(matches!(type_of("<-chan <- chan int;")?, Type::Channel(..)));
-
-        Ok(())
-    }
+    use crate::ast::{ChanMode, Type};
+    use crate::parser::Parser;
 
     const VAR_CODE: &'static str = r#"
     var x1 int
@@ -583,54 +584,53 @@ mod test {
     }
 
     #[test]
-    fn parse_imports() -> Result<()> {
-        let imports = Parser::from_str(IMPORT_CODE).parse_imports()?;
-        let mut imports = imports.iter().map(|Import { name, path, .. }| {
-            (
-                match name {
-                    None => None,
-                    Some(idt) => Some(idt.name.as_ref()),
-                },
-                path.value.as_str(),
-            )
-        });
+    fn parse_type() {
+        let type_of = |x| Parser::from_str(x).parse_type().ok();
 
-        assert_eq!(imports.next(), Some((None, "\"liba\"")));
-        assert_eq!(imports.next(), Some((Some("."), "\"libb\"")));
-        assert_eq!(imports.next(), Some((Some("_"), "\"libc\"")));
-        assert_eq!(imports.next(), Some((Some("d"), "\"libd\"")));
-        assert_eq!(imports.next(), Some((None, "\"liba\"")));
-        assert_eq!(imports.next(), Some((Some("."), "\"libb\"")));
-        assert_eq!(imports.next(), Some((Some("_"), "\"libc\"")));
-        assert_eq!(imports.next(), Some((Some("d"), "\"libd\"")));
-        assert_eq!(imports.next(), None);
+        assert_matches!(type_of("int"), Some(Type::Named(_)));
+        assert_matches!(type_of("int"), Some(Type::Named(_)));
+        assert_matches!(type_of("((int))"), Some(Type::Named(_)));
+        assert_matches!(type_of("a.b;"), Some(Type::PkgNamed(..)));
+        assert_matches!(type_of("[]int;"), Some(Type::Slice(..)));
+        assert_matches!(type_of("map[int]map[int]int;"), Some(Type::Map(..)));
 
-        Ok(())
+        assert_matches!(
+            type_of("chan int;"),
+            Some(Type::Channel(ChanMode::Double, ..))
+        );
+
+        assert_matches!(
+            type_of("<-chan <- chan int;"),
+            Some(Type::Channel(ChanMode::Receive, ..))
+        );
     }
 
     #[test]
-    fn from_file() -> Result<()> {
-        parse_file("testdata/main.go")?;
+    fn parse_imports() {
+        let imps = |s: &str| Parser::from_str(s).parse_imports();
 
-        Ok(())
+        assert!(imps("import ()").is_ok());
+        assert!(imps("import `aa`").is_ok());
+        assert!(imps("import (\n\n)").is_ok());
+        assert!(imps(r#"import "liba""#).is_ok());
+        assert!(imps(r#"import . "libb""#).is_ok());
+        assert!(imps(r#"import _ "libc""#).is_ok());
+        assert!(imps(r#"import d "libd""#).is_ok());
+        assert!(imps("import (\"a\"\n. \"b\"\n_ \"c\"\nd \"d\")").is_ok());
+
+        assert!(imps("import _").is_err());
+        assert!(imps("import _ _").is_err());
+        assert!(imps("import . ()").is_err());
     }
 
-    const IMPORT_CODE: &'static str = r#"
-    import ()
-    import (
-    
-    )
-    import   "liba"
-    import . "libb"
-    import _ "libc"
-    import d "libd"
-    import (
-          "liba"
-        . "libb"
-     )
-     import (
-        _ "libc"
-        d "libd")
+    #[test]
+    fn parse_package() {
+        let pkg = |s| Parser::from_str(s).run();
 
-    "#;
+        assert!(pkg("package main").is_ok());
+        assert!(pkg("package\n\nmain").is_ok());
+        assert!(pkg("package _").is_err());
+        assert!(pkg("package\n_").is_err());
+        assert!(pkg("\n\n").is_err());
+    }
 }
