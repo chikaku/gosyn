@@ -124,10 +124,6 @@ impl Scanner {
         skipped
     }
 
-    pub fn rewind(&mut self, pos_tok: PosTok) {
-        self.next.push_front(pos_tok);
-    }
-
     pub fn next_token(&mut self) -> Result<Option<PosTok>> {
         if let Some(pos_tok) = self.next.pop_back() {
             return Ok(Some(pos_tok));
@@ -438,7 +434,7 @@ impl Scanner {
         skipped += exp_part.len();
         let num_part = [int_part, fac_part, exp_part].concat();
         if self.next_char(skipped) == Some('i') {
-            Ok(Token::Literal(LitKind::Imag, num_part + "i"))
+            Ok(Token::Literal(LitKind::Imaginary, num_part + "i"))
         } else if num_part.find('.').is_some() {
             Ok(Token::Literal(LitKind::Float, num_part))
         } else {

@@ -3,9 +3,9 @@ use shika_proc_macro::EnumFrom;
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum LitKind {
     Ident,
+    Imaginary,
     Integer,
     Float,
-    Imag,
     Char,
     String,
 }
@@ -227,3 +227,5 @@ impl Token {
         }
     }
 }
+
+// TODO: 添加一个 TokenKind 用于 expect

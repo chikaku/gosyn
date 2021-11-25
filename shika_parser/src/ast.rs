@@ -16,21 +16,12 @@ pub struct Ident {
     pub name: String,
 }
 
-#[derive(Default, Debug)]
-pub struct PkgIdent(pub Ident);
-
-impl Into<Ident> for PkgIdent {
-    fn into(self) -> Ident {
-        self.0
-    }
-}
-
 #[derive(Default)]
 pub struct File {
     pub path: PathBuf,
     pub line_info: Vec<usize>,
 
-    pub name: PkgIdent,
+    pub name: Ident,
     pub comments: Vec<Rc<Comment>>,
     pub document: Vec<Rc<Comment>>,
     pub imports: Vec<Import>,
@@ -64,6 +55,11 @@ impl Into<StringLit> for BasicLit {
             value: self.value,
         }
     }
+}
+
+pub struct FuncLit {
+    typ: Box<Type>,
+    // body: Option<Statement>,
 }
 
 #[derive(Debug)]
@@ -101,8 +97,8 @@ pub enum Expression {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub enum Type {
-    Named(Ident),              // T
-    PkgNamed(PkgIdent, Ident), // p.T
+    Named(Ident),           // T
+    PkgNamed(Ident, Ident), // p.T
 
     Map(Box<Type>, Box<Type>),    // map[K]V
     Array(Box<Type>, Expression), // [N]T

@@ -1,5 +1,6 @@
 #![feature(exclusive_range_pattern)]
 #![feature(assert_matches)]
+#![feature(bool_to_option)]
 
 mod ast;
 mod file_set;
