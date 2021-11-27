@@ -1,16 +1,7 @@
 use shika_proc_macro::EnumFrom;
+use std::fmt::{write, Debug, Display, Formatter};
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum LitKind {
-    Ident,
-    Imaginary,
-    Integer,
-    Float,
-    Char,
-    String,
-}
-
-#[derive(Clone, Eq, PartialEq, Debug, EnumFrom)]
+#[derive(Copy, Clone, Eq, PartialEq, EnumFrom, Debug)]
 pub enum Operator {
     #[enum_from(str = "+")]
     Add,
@@ -116,7 +107,7 @@ pub enum Operator {
     SemiColon,
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, EnumFrom)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, EnumFrom)]
 pub enum Keyword {
     #[enum_from(str = "break")]
     Break,
@@ -174,58 +165,88 @@ pub enum Keyword {
     Var,
 }
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum LitKind {
+    Ident,
+    String,
+    Integer,
+    Float,
+    Imag,
+    Char,
+}
+
+#[derive(Eq, PartialEq, Clone, EnumFrom)]
 pub enum Token {
     Comment(String),
+    #[enum_from(inner)]
     Keyword(Keyword),
+    #[enum_from(inner)]
     Operator(Operator),
     Literal(LitKind, String),
 }
 
-impl From<Keyword> for Token {
-    fn from(word: Keyword) -> Self {
-        Self::Keyword(word)
-    }
-}
-
-impl From<Operator> for Token {
-    fn from(op: Operator) -> Self {
-        Self::Operator(op)
+impl Debug for Token {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Token::Comment(_) => write!(f, "/* comment */"),
+            Token::Literal(_, lit) => write!(f, "'{}'", lit),
+            Token::Operator(op) => write!(f, "'{}'", op.to_str()),
+            Token::Keyword(word) => write!(f, "'{}'", word.to_str()),
+        }
     }
 }
 
 impl Token {
-    pub fn length(&self) -> usize {
+    pub fn len(&self) -> usize {
         match self {
+            Token::Operator(op) => op.to_str().len(),
+            Token::Keyword(word) => word.to_str().len(),
             Token::Comment(text) => text.chars().count(),
-            Token::Keyword(word) => word.to_str().chars().count(),
-            Token::Operator(op) => op.to_str().chars().count(),
             Token::Literal(_, value) => value.chars().count(),
         }
     }
 
-    pub fn as_expected(&self) -> String {
+    pub fn kind(&self) -> TokenKind {
         match self {
-            Token::Comment(_) => unreachable!(),
-            Token::Keyword(word) => format!("'{}'", word.to_str()),
-            Token::Operator(op) => format!("'{}'", op.to_str()),
-            Token::Literal(kind, _) => match kind {
-                LitKind::Ident => "Identifier".to_string(),
-                LitKind::String => "String Literals".to_string(),
-                LitKind::Integer => "Integer Literals".to_string(),
-                _ => unreachable!(),
-            },
+            Token::Comment(_) => TokenKind::Comment,
+            Token::Operator(op) => TokenKind::Operator(op.clone()),
+            Token::Keyword(word) => TokenKind::Keyword(word.clone()),
+            Token::Literal(kind, _) => TokenKind::Literal(kind.clone()),
         }
     }
 
-    pub fn as_actual(&self) -> String {
-        match self {
-            Token::Operator(_) => self.as_expected(),
-            Token::Keyword(_) => self.as_expected(),
-            Token::Literal(_, lit) => format!("'{}'", lit),
-            _ => unreachable!(),
-        }
+    pub fn is<K: Into<TokenKind>>(&self, exp: K) -> bool {
+        self.kind() == exp.into()
     }
 }
 
-// TODO: 添加一个 TokenKind 用于 expect
+pub trait IntoKind = Into<TokenKind> + Copy;
+
+#[derive(Eq, PartialEq, EnumFrom, Copy, Clone)]
+pub enum TokenKind {
+    Comment,
+    #[enum_from(inner)]
+    Keyword(Keyword),
+    #[enum_from(inner)]
+    Literal(LitKind),
+    #[enum_from(inner)]
+    Operator(Operator),
+}
+
+impl Debug for TokenKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Comment => unreachable!(),
+            Self::Keyword(word) => write!(f, "'{}'", word.to_str()),
+            Self::Operator(op) => write!(f, "'{}'", op.to_str()),
+            Self::Literal(kind) => match kind {
+                LitKind::Ident => write!(f, "Identifier"),
+                LitKind::String => write!(f, "String Literals"),
+                LitKind::Integer => write!(f, "Integer Literals"),
+                LitKind::Imag => write!(f, "Imaginary Literals"),
+                LitKind::Char => write!(f, "Character Literals"),
+                LitKind::Float => write!(f, "Float Literals"),
+            },
+        }
+    }
+}

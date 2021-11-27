@@ -15,18 +15,11 @@ pub struct Error {
     pub reason: String,
 }
 
-impl Debug for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.reason)
-    }
-}
-
 pub type Result<T> = core::result::Result<T, Error>;
 
-#[allow(dead_code)]
 #[derive(Default)]
 pub struct Scanner {
-    pos: usize,
+    pub pos: usize,
     length: usize,
     source: String,
     lines: Vec<usize>,
@@ -68,6 +61,13 @@ impl Scanner {
         }
     }
 
+    fn error_at<S: AsRef<str>>(&self, pos: usize, reason: S) -> Error {
+        Error {
+            pos,
+            reason: reason.as_ref().to_string(),
+        }
+    }
+
     fn next_char(&mut self, skp: usize) -> Option<char> {
         self.source.chars().skip(self.pos + skp).next().to_owned()
     }
@@ -76,14 +76,8 @@ impl Scanner {
         self.source.chars().skip(self.pos).take(n).collect()
     }
 
-    fn error_at<S: AsRef<str>>(&self, pos: usize, reason: S) -> Error {
-        Error {
-            pos,
-            reason: reason.as_ref().to_string(),
-        }
-    }
-
     fn try_insert_semicolon(&mut self, pos: usize) {
+        // TODO: 用 matches 重写
         match self.prev {
             Some(
                 Token::Literal(..)
@@ -139,7 +133,7 @@ impl Scanner {
             true => None,
             false => {
                 let tok = self.scan_token()?;
-                self.pos += tok.length();
+                self.pos += tok.len();
                 self.prev = Some(tok.clone());
                 Some((current, tok))
             }
@@ -170,10 +164,10 @@ impl Scanner {
             '\'' => Token::Literal(LitKind::Char, self.scan_lit_rune()?),
             '"' | '`' => Token::Literal(LitKind::String, self.scan_lit_string()?),
             ch if is_letter(ch) => {
-                let identify = self.scan_identify();
-                match Keyword::from_str(&identify) {
+                let identifier = self.scan_identifier();
+                match Keyword::from_str(&identifier) {
                     Ok(word) => Token::Keyword(word),
-                    _ => Token::Literal(LitKind::Ident, identify),
+                    _ => Token::Literal(LitKind::Ident, identifier),
                 }
             }
             other => match next0_char_op {
@@ -211,10 +205,10 @@ impl Scanner {
         }
     }
 
-    /// scan an identify
+    /// scan an identifier
     /// caller must ensure that the first character is a unicode letter
     /// caller should check if identify is a keyword
-    fn scan_identify(&mut self) -> String {
+    fn scan_identifier(&mut self) -> String {
         self.source
             .chars()
             .skip(self.pos)
@@ -434,7 +428,7 @@ impl Scanner {
         skipped += exp_part.len();
         let num_part = [int_part, fac_part, exp_part].concat();
         if self.next_char(skipped) == Some('i') {
-            Ok(Token::Literal(LitKind::Imaginary, num_part + "i"))
+            Ok(Token::Literal(LitKind::Imag, num_part + "i"))
         } else if num_part.find('.').is_some() {
             Ok(Token::Literal(LitKind::Float, num_part))
         } else {
@@ -606,7 +600,7 @@ mod test {
     fn scan_line_info() {
         let code = "package main\n/*\n\n*/\n\n// 123\n\n";
         let mut scanner = Scanner::new(code);
-        while let Some(_) = scanner.next_token().unwrap() {}
+        while let Ok(Some(_)) = scanner.next_token() {}
         let mut lines = scanner.lines.iter();
         assert_eq!(lines.next(), Some(&13));
         assert_eq!(lines.next(), Some(&16));

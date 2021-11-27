@@ -1,4 +1,5 @@
 use core::result;
+use std::assert_matches::assert_matches;
 use std::fmt::{Debug, Formatter};
 use std::fs::File;
 use std::io;
@@ -6,11 +7,14 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use crate::ast::{self, BasicLit, Expression, Ident};
+use crate::ast::{self, BasicLit, Expression, FuncLit, Ident};
 use crate::ast::{ChanMode, VarSpec};
 use crate::scanner::{PosTok, Scanner};
+use crate::token::IntoKind;
 use crate::token::{Keyword, LitKind, Operator, Token};
-use crate::Pos;
+use crate::{Pos, TokenKind};
+
+use shika_proc_macro::EnumFrom;
 
 pub fn parse_source<S: AsRef<str>>(source: S) -> Result<ast::File> {
     Parser::from_str(source).run()
@@ -22,25 +26,21 @@ pub fn parse_file<P: AsRef<Path>>(path: P) -> Result<ast::File> {
 
 type Result<T> = result::Result<T, Error>;
 
+#[derive(EnumFrom)]
 pub enum Error {
+    #[enum_from(inner)]
     IO(io::Error),
     UnexpectedToken {
-        expect: Vec<Token>,
-        actual: Option<Token>,
         path: PathBuf,
         location: (usize, usize),
+        expect: Vec<TokenKind>,
+        actual: Option<Token>,
     },
     Else {
         path: PathBuf,
         location: (usize, usize),
         reason: String,
     },
-}
-
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Self {
-        Self::IO(err)
-    }
 }
 
 impl Debug for Error {
@@ -56,23 +56,15 @@ impl Debug for Error {
                 let (line, offset) = location;
                 let path = path.as_os_str().to_str().unwrap();
                 let file_line = format!("{}:{}:{}", path, line, offset);
-
                 let exp = match expect.len() {
                     0 => format!("expected something"),
-                    1 => format!("expected {}", expect[0].as_expected()),
-                    _ => format!(
-                        "expected {}",
-                        expect
-                            .iter()
-                            .map(|t| t.as_expected())
-                            .collect::<Vec<_>>()
-                            .join(" or ")
-                    ),
+                    1 => format!("expected {:?}", expect[0]),
+                    _ => format!("expected {:?}", expect),
                 };
 
                 match actual {
                     None => write!(f, "{} {}, found EOF", file_line, exp),
-                    Some(tok) => write!(f, "{} {}, found {}", file_line, exp, tok.as_actual()),
+                    Some(tok) => write!(f, "{} {}, found {:?}", file_line, exp, tok),
                 }
             }
             Error::Else {
@@ -149,33 +141,27 @@ const BRACE_LEFT: Token = Token::Operator(Operator::BraceLeft);
 #[allow(dead_code)]
 const BRACE_RIGHT: Token = Token::Operator(Operator::BraceRight);
 
-const LIT_STRING: Token = Token::Literal(LitKind::String, String::new());
+const LIT_STRING: TokenKind = TokenKind::Literal(LitKind::String);
 
 impl Parser {
-    fn unexpected(&self, pos: usize, expect: Vec<Token>, actual: Token) -> Error {
+    fn unexpected<K: IntoKind>(&self, expect: Vec<K>, actual: Option<PosTok>) -> Error {
+        let (pos, actual) = actual
+            .map(|(pos, tok)| (pos, Some(tok)))
+            .unwrap_or((self.scan.position(), None));
+
+        let expect = expect.iter().map(|&x| x.into()).collect();
         Error::UnexpectedToken {
             expect,
-            actual: Some(actual),
+            actual,
             path: self.path.clone(),
             location: self.scan.line_info(pos),
         }
     }
 
-    fn unexpected_none(&self, expect: Vec<Token>) -> Error {
-        Error::UnexpectedToken {
-            expect,
-            actual: None,
-            path: self.path.clone(),
-            location: self.scan.line_info(self.scan.position()),
-        }
-    }
-
     fn else_error_at<S: AsRef<str>>(&self, pos: Pos, reason: S) -> Error {
-        let path = self.path.clone();
-        let location = self.scan.line_info(pos);
         Error::Else {
-            path,
-            location,
+            path: self.path.clone(),
+            location: self.scan.line_info(pos),
             reason: reason.as_ref().to_string(),
         }
     }
@@ -184,18 +170,35 @@ impl Parser {
         self.else_error_at(self.scan.position(), reason)
     }
 
-    fn expect_current(&mut self, expect: Token) -> Result<()> {
-        match self.current.to_owned() {
-            Some((_, actual)) if actual == expect => Ok(()),
-            Some((pos, actual)) => Err(self.unexpected(pos, vec![expect], actual)),
-            _ => Err(self.unexpected_none(vec![expect])),
+    fn expect<K: IntoKind>(&mut self, expect: K) -> Result<()> {
+        if let Some((_, tok)) = &self.current {
+            if tok.kind() == expect.into() {
+                self.next()?;
+                return Ok(());
+            }
+        }
+
+        Err(self.unexpected(vec![expect.into()], self.current.to_owned()))
+    }
+
+    fn current_is<K: IntoKind>(&self, expect: K) -> bool {
+        match &self.current {
+            Some((_, tok)) => tok.kind() == expect.into(),
+            _ => false,
         }
     }
 
+    /// skip while current equal to expect
+    fn skipped<K: IntoKind>(&mut self, expect: K) -> Result<bool> {
+        self.current_is(expect)
+            .then(|| self.next().map(|_| true))
+            .unwrap_or(Ok(false))
+    }
+
     /// check next token must be expect and go to next
-    fn expect_next(&mut self, expect: Token) -> Result<()> {
+    fn expect_next(&mut self, expect: TokenKind) -> Result<()> {
         self.next()?;
-        self.expect_current(expect)?;
+        self.expect(expect)?;
         self.next();
         Ok(())
     }
@@ -211,30 +214,26 @@ impl Parser {
         })
     }
 
-    fn expect_none_or(&mut self, expect: Token) -> Result<bool> {
-        self.next()?;
+    fn expect_none_or<K: IntoKind>(&mut self, expect: K) -> Result<bool> {
         match self.current.to_owned() {
             None => Ok(true),
-            Some((_, actual)) if actual == expect => {
+            Some((_, actual)) if actual.kind() == expect.into() => {
                 self.next()?;
                 Ok(false)
             }
-            Some((pos, other)) => Err(self.unexpected(pos, vec![expect], other)),
+            other @ _ => Err(self.unexpected(vec![expect.into()], other)),
         }
     }
 
-    fn expect_identify(&mut self) -> Result<ast::Ident> {
-        self.next()?;
-        let expect = Token::Literal(LitKind::Ident, String::new());
+    fn parse_ident(&mut self) -> Result<ast::Ident> {
         match self.current.to_owned() {
             Some((pos, Token::Literal(LitKind::Ident, name))) => Ok(ast::Ident { pos, name }),
-            Some((pos, actual)) => Err(self.unexpected(pos, vec![expect], actual)),
-            None => Err(self.unexpected_none(vec![expect])),
+            other @ _ => Err(self.unexpected(vec![LitKind::Ident], other)),
         }
     }
 
-    fn expect_pkg_name(&mut self) -> Result<ast::Ident> {
-        let id = self.expect_identify()?;
+    fn parse_pkg_name(&mut self) -> Result<ast::Ident> {
+        let id = self.parse_ident()?;
         match id.name.as_str() {
             BLANK => Err(self.else_error_at(id.pos, ERR_PKG_NAME_BLANK)),
             _ => {
@@ -246,21 +245,19 @@ impl Parser {
 
     /// expect next to be a string literal and go to next
     fn expect_string_literal(&mut self) -> Result<ast::StringLit> {
-        self.next()?;
-        match self.current.to_owned() {
+        match self.next_owned()? {
             Some((pos, Token::Literal(LitKind::String, value))) => {
                 self.next()?;
                 Ok(ast::StringLit { pos, value })
             }
-            Some((pos, actual)) => Err(self.unexpected(pos, vec![LIT_STRING], actual)),
-            _ => Err(self.unexpected_none(vec![LIT_STRING])),
+            other @ _ => Err(self.unexpected(vec![LitKind::String], other)),
         }
     }
 
     fn expect_identifier_list(&mut self) -> Result<Vec<ast::Ident>> {
-        let mut result = vec![self.expect_identify()?];
-        while matches!(self.next()?, Some((_, COMMA))) {
-            result.push(self.expect_identify()?);
+        let mut result = vec![self.parse_ident()?];
+        while matches!(self.next()?, Some((_, Token::Operator(Operator::Comma)))) {
+            result.push(self.parse_ident()?);
         }
 
         Ok(result)
@@ -290,16 +287,15 @@ impl Parser {
     }
 
     fn next_owned(&mut self) -> Result<Option<PosTok>> {
-        let pos_tok = self.next()?;
-        Ok(match pos_tok {
+        Ok(match self.next()? {
             None => None,
             Some(pk) => Some(pk.to_owned()),
         })
     }
 
     pub fn parse_package(&mut self) -> Result<ast::Ident> {
-        self.expect_current(Keyword::Package.into())?;
-        self.expect_pkg_name()
+        self.expect(Keyword::Package)?;
+        self.parse_pkg_name()
     }
 
     pub fn run(&mut self) -> Result<ast::File> {
@@ -308,7 +304,7 @@ impl Parser {
 
         file.name = self.parse_package()?;
         file.document.append(&mut self.lead_comments);
-        self.expect_none_or(SEMI_COLON)?;
+        self.expect_none_or(Operator::SemiColon)?;
 
         // match Import declaration
         file.imports.extend(self.parse_imports()?);
@@ -318,37 +314,58 @@ impl Parser {
             let tok = self.current.to_owned().map(|(_, tok)| tok);
 
             // match Var Const Type Func declaration
-            match tok {
-                Some(VAR) => {
-                    self.parse_var()?;
-                }
-                Some(CONST) => {}
-                Some(TYPE) => {}
-                Some(FUNC) => {}
-                None => {
-                    file.comments.append(&mut self.comments);
-                    return Ok(file);
-                }
-                Some(other) => {
-                    return Err(self.unexpected(
-                        self.scan.position(),
-                        vec![VAR, CONST, TYPE, FUNC],
-                        other,
-                    ));
-                }
-            }
+            // match tok {
+            //     Some(VAR) => {
+            //         self.parse_var()?;
+            //     }
+            //     Some(CONST) => {}
+            //     Some(TYPE) => {}
+            //     Some(FUNC) => {}
+            //     None => {
+            //         file.comments.append(&mut self.comments);
+            //         return Ok(file);
+            //     }
+            //     Some(other) => {
+            //         return Err(self.unexpected(
+            //             self.scan.position(),
+            //             vec![VAR, CONST, TYPE, FUNC],
+            //             other,
+            //         ));
+            //     }
+            // }
+            unimplemented!()
         }
     }
 
-    fn parse_imports(&mut self) -> Result<Vec<ast::Import>> {
+    pub fn parse_imports(&mut self) -> Result<Vec<ast::Import>> {
         let mut imports = vec![];
-        while matches!(self.current, Some((_, IMPORT))) {
-            match self.next()? {
-                Some((_, PAREN_LEFT)) => imports.extend(self.parse_import_group()?),
-                _ => imports.push(self.parse_import_sepc()?),
+        while self.current_is(Keyword::Import) {
+            self.next()?;
+            match self.current_is(Operator::ParenLeft) {
+                true => imports.extend(self.parse_import_group()?),
+                false => imports.push(self.parse_import_sepc()?),
             }
+            self.skipped(Operator::SemiColon)?;
+        }
 
-            self.forward_matched(SEMI_COLON)?;
+        Ok(imports)
+    }
+
+    /// parse import group like
+    /// ```go
+    /// import (
+    ///     net "x/net"
+    ///     sys "x/sys"
+    /// )
+    /// ```
+    fn parse_import_group(&mut self) -> Result<Vec<ast::Import>> {
+        // come here only because we met a ( so need go next
+        // current must be ParenLeft
+        self.next()?;
+        let mut imports = vec![];
+        while !self.current_is(Operator::ParenRight) {
+            imports.push(self.parse_import_sepc()?);
+            self.skipped(Operator::SemiColon)?;
         }
 
         Ok(imports)
@@ -358,10 +375,10 @@ impl Parser {
         let mut docs = Vec::new();
         docs.append(&mut self.lead_comments);
 
-        let exp_list = vec![
+        let exp_list: Vec<TokenKind> = vec![
             Operator::Period.into(),
-            Token::Literal(LitKind::Ident, String::new()),
-            Token::Literal(LitKind::String, String::new()),
+            LitKind::Ident.into(),
+            LitKind::String.into(),
         ];
 
         let (name, path) = match self.current.to_owned() {
@@ -380,39 +397,25 @@ impl Parser {
                 self.next()?;
                 (None, ast::StringLit { pos, value })
             }
-            Some((pos, other)) => return Err(self.unexpected(pos, exp_list, other)),
-            None => return Err(self.unexpected_none(exp_list)),
+            other @ _ => return Err(self.unexpected(exp_list, other)),
         };
 
         Ok(ast::Import { docs, name, path })
     }
 
-    fn parse_import_group(&mut self) -> Result<Vec<ast::Import>> {
-        // come here becase we meat a ( so need next
-        // current must be PAREN_LEFT
-        self.next()?;
-        let mut imports = vec![];
-        while !matches!(self.current, Some((_, PAREN_RIGHT))) {
-            imports.push(self.parse_import_sepc()?);
-            self.forward_matched(SEMI_COLON)?;
-        }
-
-        Ok(imports)
-    }
-
     fn parse_var(&mut self) -> Result<Vec<VarSpec>> {
         let mut vars = vec![];
-        if self.forward_matched(VAR)? {
-            if self.forward_matched(PAREN_LEFT)? {
-                while !self.forward_matched(PAREN_RIGHT)? {
+        if self.skipped(Keyword::Var)? {
+            if self.skipped(Operator::ParenLeft)? {
+                while !self.current_is(Operator::ParenRight) {
                     vars.push(self.parse_var_spec()?);
-                    self.forward_matched(SEMI_COLON)?;
+                    self.skipped(Operator::SemiColon)?;
                 }
                 return Ok(vars);
             }
 
             vars.push(self.parse_var_spec()?);
-            self.expect_none_or(SEMI_COLON)?;
+            self.skipped(Operator::SemiColon)?;
         }
 
         Ok(vars)
@@ -444,14 +447,14 @@ impl Parser {
                 let id0 = ast::Ident { pos, name };
                 // TODO: nexted !
                 match self.next()? {
-                    Some((_, PERIOD)) => Ok(ast::Type::PkgNamed(id0, self.expect_identify()?)),
+                    Some((_, PERIOD)) => Ok(ast::Type::PkgNamed(id0, self.parse_ident()?)),
                     _ => Ok(ast::Type::Named(id0.into())),
                 }
             }
             PAREN_LEFT => {
                 self.next()?;
                 let typ = self.parse_type()?;
-                self.expect_current(PAREN_RIGHT)?;
+                self.expect(PAREN_RIGHT.kind())?;
                 return Ok(typ);
             }
             BARACK_LEFT => {
@@ -467,9 +470,9 @@ impl Parser {
                 }
             }
             MAP => {
-                self.expect_next(BARACK_LEFT)?;
+                self.expect_next(BARACK_LEFT.kind())?;
                 let key_type = Box::new(self.parse_type()?);
-                self.expect_current(BARACK_RIGHT)?;
+                self.expect(BARACK_RIGHT.kind())?;
                 self.next()?;
                 let val_type = Box::new(self.parse_type()?);
                 Ok(ast::Type::Map(key_type, val_type))
@@ -505,9 +508,10 @@ impl Parser {
     }
 
     fn parse_unary_expr(&mut self) -> Result<ast::Expression> {
-        self.next()?;
-        // TODO: check current
-        let (pos, tok) = self.current.to_owned().unwrap();
+        let (pos, tok) = self
+            .current
+            .to_owned()
+            .ok_or(self.else_error("unexpecred EOF"))?;
 
         match tok {
             Token::Operator(
@@ -547,7 +551,7 @@ impl Parser {
                         _ => Some(self.parse_type()?),
                     };
 
-                    self.expect_next(PAREN_RIGHT)?;
+                    self.expect_next(PAREN_RIGHT.kind())?;
                     Ok(Expression::TypeAssert {
                         left: Box::new(operand),
                         assert: Box::new(typ),
@@ -563,15 +567,17 @@ impl Parser {
     }
 
     fn parse_operand(&mut self) -> Result<ast::Expression> {
-        // TODO: check None
-        let (pos, tok) = self.current.to_owned().unwrap();
+        let (pos, tok) = self
+            .current
+            .to_owned()
+            .ok_or(self.else_error("unexpecred EOF"))?;
+
         match tok {
             Token::Literal(LitKind::Ident, name) => Expression::Ident(Ident { pos, name }),
             Token::Literal(kind, value) => Expression::BasicLit(BasicLit { pos, kind, value }),
             PAREN_LEFT => {
-                // TODO: maybe a type a.(int)
                 let expr = self.parse_expr()?;
-                self.expect_next(PAREN_RIGHT)?;
+                self.expect_next(PAREN_RIGHT.kind())?;
                 Expression::Paren {
                     pos: (pos, self.scan.position() - 1),
                     expr: Box::new(expr),
@@ -588,8 +594,16 @@ impl Parser {
     }
 
     fn parse_func_type(&mut self) -> Result<ast::FuncLit> {
-        unimplemented!()
+        self.expect(FUNC.kind())?;
+        self.expect_next(PAREN_LEFT.kind())?;
+        while !matches!(self.next()?, Some((_, PAREN_RIGHT))) {}
+
+        Ok(ast::FuncLit {
+            typ: Box::new(ast::Type::Function()),
+        })
     }
+
+    fn parse_params_list(&mut self) {}
 }
 
 #[cfg(test)]
@@ -598,6 +612,7 @@ mod test {
 
     use crate::ast::{ChanMode, Type};
     use crate::parser::Parser;
+    use crate::{Keyword, Token};
 
     const VAR_CODE: &'static str = r#"
     var x1 int

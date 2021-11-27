@@ -58,7 +58,7 @@ impl Into<StringLit> for BasicLit {
 }
 
 pub struct FuncLit {
-    typ: Box<Type>,
+    pub typ: Box<Type>,
     // body: Option<Statement>,
 }
 
