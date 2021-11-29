@@ -2,9 +2,9 @@ use crate::token::Operator;
 use crate::token::Token;
 use crate::{Keyword, LitKind};
 use std::collections::VecDeque;
-use std::fmt::{Debug, Formatter};
 use std::ops::Add;
 use std::str::FromStr;
+
 use unic_ucd_category::GeneralCategory;
 
 pub type Pos = usize;

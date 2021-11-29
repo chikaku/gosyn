@@ -10,7 +10,7 @@ pub struct Comment {
     pub text: String,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct Ident {
     pub pos: usize,
     pub name: String,
@@ -34,7 +34,7 @@ pub struct Import {
     pub path: StringLit,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BasicLit {
     pub pos: usize,
     pub kind: LitKind,
@@ -57,18 +57,35 @@ impl Into<StringLit> for BasicLit {
     }
 }
 
-pub struct FuncLit {
-    pub typ: Box<Type>,
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub name: Option<Ident>,
+    pub input: Vec<Params>,
+    pub output: Vec<Params>,
     // body: Option<Statement>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub struct Params {
+    pub name: Option<Ident>,
+    pub typ: (Box<Type>, bool),
+}
+
+#[derive(Debug, Clone)]
 pub enum Expression {
     Invalid,
-
     Ident(Ident),
     BasicLit(BasicLit),
-    Func(),
+
+    Type {
+        pos: usize,
+        typ: Box<Type>,
+    },
+
+    Function {
+        pos: usize,
+        func: Box<Function>,
+    },
 
     Paren {
         pos: (usize, usize),
@@ -94,8 +111,7 @@ pub enum Expression {
     },
 }
 
-#[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Type {
     Named(Ident),           // T
     PkgNamed(Ident, Ident), // p.T
@@ -111,7 +127,7 @@ pub enum Type {
     Struct(Vec<(Vec<Ident>, Box<Type>)>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum ChanMode {
     Double,
     Send,

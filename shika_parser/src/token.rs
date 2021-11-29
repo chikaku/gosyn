@@ -1,5 +1,6 @@
+use std::fmt::{Debug, Formatter};
+
 use shika_proc_macro::EnumFrom;
-use std::fmt::{write, Debug, Display, Formatter};
 
 #[derive(Copy, Clone, Eq, PartialEq, EnumFrom, Debug)]
 pub enum Operator {
@@ -250,3 +251,17 @@ impl Debug for TokenKind {
         }
     }
 }
+
+/// alias to some often used token
+pub const STAR: Token = Token::Operator(Operator::Period);
+pub const ARROW: Token = Token::Operator(Operator::Arrow);
+pub const PERIOD: Token = Token::Operator(Operator::Period);
+pub const LPAREN: Token = Token::Operator(Operator::ParenLeft);
+pub const RPAREN: Token = Token::Operator(Operator::ParenLeft);
+pub const LBARACK: Token = Token::Operator(Operator::BarackLeft);
+pub const RBARACK: Token = Token::Operator(Operator::BarackRight);
+
+pub const VAR: Token = Token::Keyword(Keyword::Var);
+pub const MAP: Token = Token::Keyword(Keyword::Map);
+pub const CHAN: Token = Token::Keyword(Keyword::Chan);
+pub const FUNC: Token = Token::Keyword(Keyword::Func);
