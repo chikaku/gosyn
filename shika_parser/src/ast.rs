@@ -41,18 +41,40 @@ pub struct BasicLit {
     pub value: String,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct StringLit {
     pub pos: usize,
     pub value: String,
 }
 
-impl Into<StringLit> for BasicLit {
-    fn into(self) -> StringLit {
-        assert_eq!(self.kind, LitKind::String);
+impl From<BasicLit> for StringLit {
+    fn from(lit: BasicLit) -> StringLit {
+        assert_eq!(lit.kind, LitKind::String);
         StringLit {
-            pos: self.pos,
-            value: self.value,
+            pos: lit.pos,
+            value: lit.value,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FuncLit {
+    pub input: Vec<Params>,
+    pub output: Vec<Params>,
+    // body: Option<Statement>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Params {
+    pub name: Option<Ident>,
+    pub typ: (Box<Type>, bool),
+}
+
+impl From<Ident> for Params {
+    fn from(id: Ident) -> Self {
+        Params {
+            name: None,
+            typ: (Box::new(id.into()), false),
         }
     }
 }
@@ -66,12 +88,6 @@ pub struct Function {
 }
 
 #[derive(Debug, Clone)]
-pub struct Params {
-    pub name: Option<Ident>,
-    pub typ: (Box<Type>, bool),
-}
-
-#[derive(Debug, Clone)]
 pub enum Expression {
     Invalid,
     Ident(Ident),
@@ -82,9 +98,9 @@ pub enum Expression {
         typ: Box<Type>,
     },
 
-    Function {
+    FuncLit {
         pos: usize,
-        func: Box<Function>,
+        func: FuncLit,
     },
 
     Paren {
@@ -113,18 +129,69 @@ pub enum Expression {
 
 #[derive(Clone, Debug)]
 pub enum Type {
-    Named(Ident),           // T
-    PkgNamed(Ident, Ident), // p.T
-
+    Ident(TypeName),
     Map(Box<Type>, Box<Type>),    // map[K]V
     Array(Box<Type>, Expression), // [N]T
     Slice(Box<Type>),             // []T
     Channel(ChanMode, Box<Type>), // <- chan T
     Pointer(Box<Type>),           // *T
+    Struct {
+        pos: (usize, usize),
+        fields: Vec<Field>,
+    },
+    Function {
+        pos: usize,
+        input: Vec<Params>,
+        output: Vec<Params>,
+    },
+    Interface {
+        pos: (usize, usize),
+        methods: Vec<InterfaceElem>,
+    },
+}
 
-    Function(),
-    Interface(),
-    Struct(Vec<(Vec<Ident>, Box<Type>)>),
+impl From<TypeName> for Type {
+    fn from(id: TypeName) -> Self {
+        Self::Ident(id)
+    }
+}
+
+impl From<Ident> for Type {
+    fn from(id: Ident) -> Self {
+        Self::Ident(id.into())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TypeName {
+    pub pkg: Option<Ident>,
+    pub name: Ident,
+}
+
+impl From<Ident> for TypeName {
+    fn from(id: Ident) -> Self {
+        Self {
+            pkg: None,
+            name: id,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum InterfaceElem {
+    Embed(TypeName), // TODO: here is a type name
+    Method {
+        name: Ident,
+        input: Vec<Params>,
+        output: Vec<Params>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct Field {
+    pub name: Vec<Ident>,
+    pub typ: Type,
+    pub tag: Option<StringLit>,
 }
 
 #[derive(Debug, Clone, Copy)]

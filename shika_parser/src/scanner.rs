@@ -2,7 +2,6 @@ use crate::token::Operator;
 use crate::token::Token;
 use crate::{Keyword, LitKind};
 use std::collections::VecDeque;
-use std::ops::Add;
 use std::str::FromStr;
 
 use unic_ucd_category::GeneralCategory;
@@ -297,7 +296,7 @@ impl Scanner {
                 while self.source.chars().skip(index).next() != Some('"') {
                     let rune = self.scan_rune(index)?;
                     index += rune.chars().count();
-                    lit = lit.add(rune.as_str());
+                    lit += rune.as_str();
                 }
                 lit
             }

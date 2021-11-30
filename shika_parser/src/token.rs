@@ -9,7 +9,7 @@ pub enum Operator {
     #[enum_from(str = "-")]
     Sub,
     #[enum_from(str = "*")]
-    Mul,
+    Star,
     #[enum_from(str = "/")]
     Quo,
     #[enum_from(str = "%")]
@@ -253,7 +253,7 @@ impl Debug for TokenKind {
 }
 
 /// alias to some often used token
-pub const STAR: Token = Token::Operator(Operator::Period);
+pub const STAR: Token = Token::Operator(Operator::Star);
 pub const ARROW: Token = Token::Operator(Operator::Arrow);
 pub const PERIOD: Token = Token::Operator(Operator::Period);
 pub const LPAREN: Token = Token::Operator(Operator::ParenLeft);
@@ -265,3 +265,5 @@ pub const VAR: Token = Token::Keyword(Keyword::Var);
 pub const MAP: Token = Token::Keyword(Keyword::Map);
 pub const CHAN: Token = Token::Keyword(Keyword::Chan);
 pub const FUNC: Token = Token::Keyword(Keyword::Func);
+pub const STRUCT: Token = Token::Keyword(Keyword::Struct);
+pub const INTERFACE: Token = Token::Keyword(Keyword::Interface);
