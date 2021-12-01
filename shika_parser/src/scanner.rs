@@ -76,7 +76,6 @@ impl Scanner {
     }
 
     fn try_insert_semicolon(&mut self, pos: usize) {
-        // TODO: 用 matches 重写
         match self.prev {
             Some(
                 Token::Literal(..)
