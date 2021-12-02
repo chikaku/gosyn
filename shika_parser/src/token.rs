@@ -254,6 +254,7 @@ impl Debug for TokenKind {
 
 /// alias to some often used token
 pub const STAR: Token = Token::Operator(Operator::Star);
+pub const COLON: Token = Token::Operator(Operator::Colon);
 pub const ARROW: Token = Token::Operator(Operator::Arrow);
 pub const PERIOD: Token = Token::Operator(Operator::Period);
 pub const LPAREN: Token = Token::Operator(Operator::ParenLeft);
@@ -267,3 +268,11 @@ pub const CHAN: Token = Token::Keyword(Keyword::Chan);
 pub const FUNC: Token = Token::Keyword(Keyword::Func);
 pub const STRUCT: Token = Token::Keyword(Keyword::Struct);
 pub const INTERFACE: Token = Token::Keyword(Keyword::Interface);
+
+// alias to some often used token kind
+pub const KIND_IDENT: TokenKind = TokenKind::Literal(LitKind::Ident);
+
+pub const KIND_COMMA: TokenKind = TokenKind::Operator(Operator::Comma);
+pub const KIND_COLON: TokenKind = TokenKind::Operator(Operator::Colon);
+pub const KIND_LPAREN: TokenKind = TokenKind::Operator(Operator::ParenLeft);
+pub const KIND_RBARACK: TokenKind = TokenKind::Operator(Operator::BarackRight);
