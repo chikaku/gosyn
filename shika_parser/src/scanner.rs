@@ -158,7 +158,8 @@ impl Scanner {
         let next0_char_op = Operator::from_str(&next0_char.to_string()).ok();
 
         Ok(match next0_char {
-            '0'..'9' | '.' if next1_is_digits => self.scan_lit_number()?,
+            '0'..'9' => self.scan_lit_number()?,
+            '.' if next1_is_digits => self.scan_lit_number()?,
             '\'' => Token::Literal(LitKind::Char, self.scan_lit_rune()?),
             '"' | '`' => Token::Literal(LitKind::String, self.scan_lit_string()?),
             ch if is_letter(ch) => {
@@ -485,6 +486,7 @@ mod test {
     #[test]
     fn scan_lit_number() {
         let numeric = |s| Scanner::new(s).scan_lit_number();
+        assert!(numeric("1").is_ok());
         assert!(numeric("42").is_ok());
         assert!(numeric("4_2").is_ok());
         assert!(numeric("0600").is_ok());

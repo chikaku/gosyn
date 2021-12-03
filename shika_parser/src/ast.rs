@@ -42,12 +42,6 @@ pub struct PointerType {
 }
 
 #[derive(Debug, Clone)]
-pub struct EllipsisArrayType {
-    pub pos: (usize, usize),
-    pub typ: Box<Type>,
-}
-
-#[derive(Debug, Clone)]
 pub struct ArrayType {
     pub pos: (usize, usize),
     pub len: Box<Expression>,
@@ -136,35 +130,27 @@ pub enum Type {
     // pkg.Type
     #[enum_from(inner)]
     Ident(TypeName),
-
     // map[K]V
     #[enum_from(inner)]
     Map(MapType),
-
     // [N]T
     #[enum_from(inner)]
     Array(ArrayType),
-
     // []T
     #[enum_from(inner)]
     Slice(SliceType),
-
     // <-chan T | chan<- T | chan T
     #[enum_from(inner)]
     Channel(ChannelType),
-
     // *T
     #[enum_from(inner)]
     Pointer(PointerType),
-
     // struct { ... }
     #[enum_from(inner)]
     Struct(StructType),
-
     // func (...) ...
     #[enum_from(inner)]
     Function(FunctionType),
-
     // interface { ... }
     #[enum_from(inner)]
     Interface(InterfaceType),
@@ -176,7 +162,7 @@ impl From<Ident> for Type {
     }
 }
 
-// ================ Operand Definition ================
+// ================ Expression Definition ================
 
 #[derive(Debug, Clone)]
 pub struct BasicLit {
@@ -228,48 +214,11 @@ pub struct LiteralValue {
     pub values: Vec<KeyedElement>,
 }
 
-#[derive(Debug, Clone, EnumFrom)]
-pub enum LiteralType {
-    #[enum_from(inner)]
-    Map(MapType),
-
-    #[enum_from(inner)]
-    Slice(SliceType),
-
-    #[enum_from(inner)]
-    Ident(TypeName),
-
-    #[enum_from(inner)]
-    Struct(StructType),
-
-    #[enum_from(inner)]
-    Array(ArrayType),
-
-    #[enum_from(inner)]
-    EllipsisArray(EllipsisArrayType),
-}
-
 #[derive(Debug, Clone)]
 pub struct CompositeLit {
-    pub typ: LiteralType,
+    pub typ: Box<Expression>,
     pub val: LiteralValue,
 }
-
-#[derive(Debug, Clone, EnumFrom)]
-pub enum Operand {
-    #[enum_from(inner)]
-    Ident(TypeName),
-    #[enum_from(inner)]
-    Expr(Box<Expression>),
-    #[enum_from(inner)]
-    BasicLit(BasicLit),
-    #[enum_from(inner)]
-    FunctionLit(FunctionLit),
-    #[enum_from(inner)]
-    CompositeLit(CompositeLit),
-}
-
-// ================ Expression Definition ================
 
 #[derive(Debug, Clone)]
 pub struct Conversion {
@@ -282,91 +231,90 @@ pub struct Conversion {
 pub struct Selector {
     pub pos: usize,
     pub right: Ident,
-    pub left: Box<PrimaryExpr>,
+    pub left: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
 pub struct TypeAssertion {
-    pub left: Box<PrimaryExpr>,
+    pub left: Box<Expression>,
     pub right: Option<Type>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Index {
     pub pos: (usize, usize),
-    pub left: Box<PrimaryExpr>,
+    pub left: Box<Expression>,
     pub index: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Slice {
     pub pos: (usize, usize),
-    pub low: Option<Box<Expression>>,
-    pub high: Option<Box<Expression>>,
-    pub max: Option<Box<Expression>>,
-    pub left: Box<PrimaryExpr>,
+    pub left: Box<Expression>,
+    pub index: [Option<Box<Expression>>; 3],
 }
 
-#[derive(Debug, Clone, EnumFrom)]
-pub enum PrimaryExpr {
-    #[enum_from(inner)]
-    Operand(Operand),
-    #[enum_from(inner)]
-    Conversion(Conversion),
-    #[enum_from(inner)]
-    Selector(Selector),
-    #[enum_from(inner)]
-    TypeAssertion(TypeAssertion),
-    #[enum_from(inner)]
-    Index(Index),
-    #[enum_from(inner)]
-    Slice(Slice),
+#[derive(Debug, Clone)]
+pub struct Call {
+    pub pos: (usize, usize, usize), // third pos > 0 means the ellipsis argument
+    pub args: Vec<Expression>,
+    pub left: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
 pub struct UnaryExpression {
     pub pos: usize,
-    pub operator: Operator,
-    pub operand: Box<Expression>,
+    pub op: Operator,
+    pub right: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParenExpression {
+    pub pos: (usize, usize),
+    pub expr: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StarExpression {
+    pub pos: usize,
+    pub right: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Ellipsis {
+    pub pos: usize,
 }
 
 #[derive(Debug, Clone, EnumFrom)]
 pub enum Expression {
     #[enum_from(inner)]
-    Unary(UnaryExpression),
+    Type(Type),
     #[enum_from(inner)]
-    Primary(PrimaryExpr),
-
-    Invalid,
-    #[enum_from(inner)]
-    Ident(Ident),
+    Ident(TypeName),
     #[enum_from(inner)]
     BasicLit(BasicLit),
-    Type {
-        pos: usize,
-        typ: Box<Type>,
-    },
-    FuncLit {
-        pos: usize,
-        func: FunctionLit,
-    },
-    Paren {
-        pos: (usize, usize),
-        expr: Box<Expression>,
-    },
-
-    Star {
-        pos: usize,
-        right: Box<Expression>,
-    },
-    Selector {
-        left: Box<Expression>,
-        right: Ident,
-    },
-    TypeAssert {
-        left: Box<Expression>,
-        assert: Box<Option<Type>>,
-    },
+    #[enum_from(inner)]
+    FuncLit(FunctionLit),
+    #[enum_from(inner)]
+    Star(StarExpression),
+    #[enum_from(inner)]
+    Paren(ParenExpression),
+    #[enum_from(inner)]
+    Unary(UnaryExpression),
+    #[enum_from(inner)]
+    Selector(Selector),
+    #[enum_from(inner)]
+    TypeAssert(TypeAssertion),
+    #[enum_from(inner)]
+    Call(Call),
+    #[enum_from(inner)]
+    Index(Index),
+    #[enum_from(inner)]
+    Slice(Slice),
+    #[enum_from(inner)]
+    CompositeLit(CompositeLit),
+    #[enum_from(inner)]
+    Ellipsis(Ellipsis),
 }
 
 #[derive(Default)]
