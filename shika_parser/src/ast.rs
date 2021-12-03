@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use shika_proc_macro::EnumFrom;
+use shika_proc_macro::EnumFromWrapped;
 
 #[derive(Default, Debug)]
 pub struct Comment {
@@ -125,35 +126,17 @@ pub struct InterfaceType {
     pub methods: Vec<InterfaceElem>,
 }
 
-#[derive(Clone, Debug, EnumFrom)]
+#[derive(Clone, Debug, EnumFromWrapped)]
 pub enum Type {
-    // pkg.Type
-    #[enum_from(inner)]
-    Ident(TypeName),
-    // map[K]V
-    #[enum_from(inner)]
-    Map(MapType),
-    // [N]T
-    #[enum_from(inner)]
-    Array(ArrayType),
-    // []T
-    #[enum_from(inner)]
-    Slice(SliceType),
-    // <-chan T | chan<- T | chan T
-    #[enum_from(inner)]
-    Channel(ChannelType),
-    // *T
-    #[enum_from(inner)]
-    Pointer(PointerType),
-    // struct { ... }
-    #[enum_from(inner)]
-    Struct(StructType),
-    // func (...) ...
-    #[enum_from(inner)]
-    Function(FunctionType),
-    // interface { ... }
-    #[enum_from(inner)]
-    Interface(InterfaceType),
+    Map(MapType),             // map[K]V
+    Ident(TypeName),          // pkg.Type
+    Array(ArrayType),         // [N]T
+    Slice(SliceType),         // []T
+    Struct(StructType),       // struct { ... }
+    Channel(ChannelType),     // <-chan T | chan<- T | chan T
+    Pointer(PointerType),     // *T
+    Function(FunctionType),   // func (...) ...
+    Interface(InterfaceType), // interface { ... }
 }
 
 impl From<Ident> for Type {
@@ -285,36 +268,22 @@ pub struct Ellipsis {
     pub pos: usize,
 }
 
-#[derive(Debug, Clone, EnumFrom)]
+#[derive(Debug, Clone, EnumFromWrapped)]
 pub enum Expression {
-    #[enum_from(inner)]
     Type(Type),
-    #[enum_from(inner)]
-    Ident(TypeName),
-    #[enum_from(inner)]
-    BasicLit(BasicLit),
-    #[enum_from(inner)]
-    FuncLit(FunctionLit),
-    #[enum_from(inner)]
-    Star(StarExpression),
-    #[enum_from(inner)]
-    Paren(ParenExpression),
-    #[enum_from(inner)]
-    Unary(UnaryExpression),
-    #[enum_from(inner)]
-    Selector(Selector),
-    #[enum_from(inner)]
-    TypeAssert(TypeAssertion),
-    #[enum_from(inner)]
     Call(Call),
-    #[enum_from(inner)]
     Index(Index),
-    #[enum_from(inner)]
     Slice(Slice),
-    #[enum_from(inner)]
-    CompositeLit(CompositeLit),
-    #[enum_from(inner)]
+    Ident(TypeName),
     Ellipsis(Ellipsis),
+    Selector(Selector),
+    BasicLit(BasicLit),
+    FuncLit(FunctionLit),
+    Star(StarExpression),
+    Paren(ParenExpression),
+    Unary(UnaryExpression),
+    TypeAssert(TypeAssertion),
+    CompositeLit(CompositeLit),
 }
 
 #[derive(Default)]
