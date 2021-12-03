@@ -1,16 +1,14 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
-use syn::Data;
 use syn::DataEnum;
-use syn::DeriveInput;
 use syn::Fields;
 use syn::Ident;
 use syn::Lit;
 use syn::Meta;
 use syn::NestedMeta;
 
-pub struct EnumFrom {
+pub(crate) struct EnumFrom {
     enum_name: Ident,
     enum_data: DataEnum,
     variants: Vec<Ident>,
@@ -19,26 +17,11 @@ pub struct EnumFrom {
     from_inner_enum: Vec<Ident>,
 }
 
-fn assert_data_type(input: DeriveInput) -> DataEnum {
-    match input.data {
-        Data::Enum(data) => data,
-        Data::Union(_) => panic!(
-            "EnumFrom can only be used for enum type, given {} is an union",
-            &input.ident,
-        ),
-        Data::Struct(_) => panic!(
-            "EnumFrom can only be used for enum type, {} is a struct",
-            &input.ident,
-        ),
-    }
-}
-
 impl EnumFrom {
-    pub fn new(input: DeriveInput) -> Self {
+    pub fn new(enum_name: Ident, enum_data: DataEnum) -> Self {
         EnumFrom {
-            enum_name: input.ident.clone(),
-            enum_data: assert_data_type(input),
-
+            enum_name,
+            enum_data,
             variants: vec![],
             from_str: HashMap::new(),
             from_inner_enum: vec![],
