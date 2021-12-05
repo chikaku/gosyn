@@ -1,5 +1,5 @@
 use crate::ast;
-use crate::ast::BasicLit;
+use crate::ast::{BasicLit, ChannelType};
 use crate::ast::{ChanMode, VarSpec};
 use crate::scanner::{PosTok, Scanner};
 use crate::token;
@@ -363,14 +363,18 @@ impl Parser {
             }
             token::CHAN => {
                 self.next()?;
+                let pos1 = self.current_pos();
                 let dir = self.skipped(Operator::Arrow)?.then_some(ChanMode::Send);
                 let typ = Box::new(self.parse_type()?);
+                let pos = (pos, pos1);
                 Ok(ast::ChannelType { pos, dir, typ }.into())
             }
             token::ARROW => {
                 self.next()?;
-                let dir = Some(ChanMode::Recv);
+                let pos1 = self.expect(Keyword::Chan)?;
                 let typ = Box::new(self.parse_type()?);
+                let pos = (pos, pos1);
+                let dir = Some(ChanMode::Recv);
                 Ok(ast::ChannelType { pos, dir, typ }.into())
             }
             token::STAR => {
@@ -537,10 +541,16 @@ impl Parser {
                 // channel type or receive expression
                 // (<-chan int)(x) | <- message
                 self.next()?;
-                let _expr = self.parse_unary_expr()?;
+                let expr = self.parse_unary_expr()?;
+                let expr2 = expr.clone();
+                if let Ok(typ) = expr2.try_into().and_then(|t: ast::Type| t.try_into()) {
+                    let chan_type = self.reset_chan_arrow(pos, typ);
+                    return Ok(ast::Type::Channel(chan_type?).into());
+                }
 
-                // TODO: handle <- chan int(nil)
-                unimplemented!()
+                let op = Operator::Arrow;
+                let right = Box::new(expr);
+                ast::UnaryExpression { pos, op, right }.into()
             }
             token::STAR => {
                 self.next()?;
@@ -549,6 +559,36 @@ impl Parser {
             }
             _ => self.parse_primary_expr()?.into(),
         })
+    }
+
+    /// reset the channel direction of expression `<- typ` (typ is a channel type)
+    fn reset_chan_arrow(&mut self, pos: usize, mut typ: ChannelType) -> Result<ast::ChannelType> {
+        match typ.dir {
+            Some(ast::ChanMode::Recv) => {
+                // <- <-chan T
+                Err(self.unexpected(vec![Keyword::Chan], Some((typ.pos.1, token::ARROW))))
+            }
+            None => {
+                // <- chan T
+                typ.pos = (typ.pos.0, pos);
+                typ.dir = Some(ast::ChanMode::Recv);
+                Ok(typ)
+            }
+            Some(ast::ChanMode::Send) => {
+                // <- chan<- T
+                match *typ.typ {
+                    // <-chan <-chan T
+                    ast::Type::Channel(chan_type) => {
+                        typ.typ = Box::new(self.reset_chan_arrow(typ.pos.1, chan_type)?.into());
+                        typ.dir = Some(ast::ChanMode::Recv);
+                        typ.pos = (typ.pos.0, pos);
+                        Ok(typ)
+                    }
+                    // <-chan <-expr
+                    _ => Err(self.else_error_at(typ.pos.1, "expect channel type")),
+                }
+            }
+        }
     }
 
     /// follow by https://go.dev/ref/spec#Primary_expressions
@@ -911,6 +951,12 @@ mod test {
         let expr = |s| Parser::from_str(s).parse_expr();
 
         assert!(expr("struct{}").is_ok());
+        assert!(expr("struct{}").is_ok());
+        assert!(expr("<-chan chan int").is_ok());
+        assert!(expr("<-chan chan<- int").is_ok());
+        assert!(expr("<-chan <-chan <-chan int").is_ok());
+
+        assert!(expr("<-chan <-chan <- int").is_err());
     }
 
     #[test]

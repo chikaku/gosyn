@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use shika_proc_macro::EnumFrom;
 use shika_proc_macro::EnumFromWrapped;
+use shika_proc_macro::EnumIntoWrapped;
 
 #[derive(Default, Debug)]
 pub struct Comment {
@@ -97,7 +98,7 @@ pub struct FunctionType {
     pub output: Vec<Params>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ChanMode {
     Send,
     Recv,
@@ -105,7 +106,7 @@ pub enum ChanMode {
 
 #[derive(Debug, Clone)]
 pub struct ChannelType {
-    pub pos: usize,
+    pub pos: (usize, usize), // chan, <-
     pub dir: Option<ChanMode>,
     pub typ: Box<Type>,
 }
@@ -126,7 +127,7 @@ pub struct InterfaceType {
     pub methods: Vec<InterfaceElem>,
 }
 
-#[derive(Clone, Debug, EnumFromWrapped)]
+#[derive(Clone, Debug, EnumFromWrapped, EnumIntoWrapped)]
 pub enum Type {
     Map(MapType),             // map[K]V
     Ident(TypeName),          // pkg.Type
@@ -268,7 +269,7 @@ pub struct Ellipsis {
     pub pos: usize,
 }
 
-#[derive(Debug, Clone, EnumFromWrapped)]
+#[derive(Debug, Clone, EnumFromWrapped, EnumIntoWrapped)]
 pub enum Expression {
     Type(Type),
     Call(Call),
