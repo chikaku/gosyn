@@ -1,6 +1,6 @@
 use crate::ast;
-use crate::ast::{BasicLit, ChannelType};
-use crate::ast::{ChanMode, VarSpec};
+use crate::ast::ChanMode;
+use crate::ast::{BasicLit, ChannelType, Declaration};
 use crate::scanner::{PosTok, Scanner};
 use crate::token;
 use crate::token::IntoKind;
@@ -212,13 +212,15 @@ impl Parser {
         // match Import declaration
         file.imports.extend(self.parse_imports()?);
 
+        let mut vars = vec![];
+        let mut types = vec![];
+
         loop {
             self.skipped(Operator::SemiColon)?;
             let (_, tok) = self.get_current()?;
             match tok {
-                token::VAR => {
-                    self.parse_var()?;
-                }
+                token::VAR => vars.push(self.parse_decl(Parser::parse_var_spec)),
+                token::TYPE => types.push(self.parse_decl(Parser::parse_type_sepc)),
                 _ => unimplemented!(),
             }
         }
@@ -290,37 +292,70 @@ impl Parser {
         Ok(ast::Import { docs, name, path })
     }
 
-    fn parse_var(&mut self) -> Result<Vec<VarSpec>> {
-        let mut vars = vec![];
-        if self.skipped(Keyword::Var)? {
-            if self.skipped(Operator::ParenLeft)? {
-                while !self.current_is(Operator::ParenRight) {
-                    vars.push(self.parse_var_spec()?);
-                    self.skipped(Operator::SemiColon)?;
-                }
-                return Ok(vars);
-            }
+    fn parse_decl<T, F: FnMut(&mut Parser) -> Result<T>>(
+        &mut self,
+        mut parse_spec: F,
+    ) -> Result<Declaration<T>> {
+        let mut specs = vec![];
+        let pos0 = self.current_pos();
+        self.next()?;
 
-            vars.push(self.parse_var_spec()?);
-            self.skipped(Operator::SemiColon)?;
+        if self.current_is(Operator::ParenLeft) {
+            let left = self.expect(Operator::ParenLeft)?;
+            while !self.current_is(Operator::ParenRight) {
+                specs.push(parse_spec(self)?);
+                self.skipped(Operator::SemiColon)?;
+            }
+            let right = self.expect(Operator::ParenRight)?;
+            let pos1 = Some((left, right));
+            return Ok(Declaration { pos0, specs, pos1 });
         }
 
-        Ok(vars)
+        let pos1 = None;
+        specs.push(parse_spec(self)?);
+        self.skipped(Operator::SemiColon)?;
+        Ok(Declaration { pos0, specs, pos1 })
     }
 
     fn parse_var_spec(&mut self) -> Result<ast::VarSpec> {
         let mut spec = ast::VarSpec::default();
         spec.name = self.parse_ident_list()?;
-        if !self.skipped(Operator::Assign)? {
-            spec.typ = Some(self.parse_type()?);
+        match self.skipped(Operator::Assign)? {
+            true => spec.values = self.parse_expr_list()?,
+            false => {
+                spec.typ = Some(self.parse_type()?);
+                if self.skipped(Operator::Assign)? {
+                    spec.values = self.parse_expr_list()?;
+                }
+            }
         }
 
-        if self.skipped(Operator::Assign)? {
-            // TODO: expect ExpressionList
+        let pos = self.current_pos();
+        let value_count = spec.values.len();
+        match value_count {
+            0 => Ok(spec),
+            _ => match value_count.cmp(&spec.name.len()) {
+                std::cmp::Ordering::Equal => Ok(spec),
+                std::cmp::Ordering::Less => Err(self.else_error_at(pos, "mission init expression")),
+                std::cmp::Ordering::Greater => {
+                    Err(self.else_error_at(pos, "extra init expression"))
+                }
+            },
         }
+    }
 
-        // TODO: should expect something ?
-        Ok(spec)
+    fn parse_type_sepc(&mut self) -> Result<ast::TypeSpec> {
+        let docs = vec![];
+        let name = self.parse_ident()?;
+        let alias = self.skipped(Operator::Assign)?;
+        let typ = self.parse_type()?;
+
+        Ok(ast::TypeSpec {
+            docs,
+            name,
+            alias,
+            typ,
+        })
     }
 
     pub fn parse_type(&mut self) -> Result<ast::Type> {
@@ -474,7 +509,7 @@ impl Parser {
                     }
                 }
                 // { T }
-                _ => (vec![], self.parse_embeded_field()?),
+                _ => (vec![], self.parse_embed_field()?),
             };
 
             let tag = match self.get_current()? {
@@ -496,7 +531,7 @@ impl Parser {
         })
     }
 
-    fn parse_embeded_field(&mut self) -> Result<ast::Type> {
+    fn parse_embed_field(&mut self) -> Result<ast::Type> {
         let pos = self.current_pos();
         let star = self.skipped(Operator::Star)?;
         let type_name = self.parse_type_name()?;
@@ -516,6 +551,15 @@ impl Parser {
             true => Ok(ast::Ellipsis { pos }.into()),
             false => self.parse_expr(),
         }
+    }
+
+    fn parse_expr_list(&mut self) -> Result<Vec<ast::Expression>> {
+        let mut result = vec![self.parse_expr()?];
+        while self.skipped(Operator::Comma)? {
+            result.push(self.parse_expr()?);
+        }
+
+        Ok(result)
     }
 
     pub fn parse_expr(&mut self) -> Result<ast::Expression> {
@@ -947,6 +991,19 @@ mod test {
     use crate::parser::Parser;
 
     #[test]
+    fn parse_var() {
+        let vars = |s| Parser::from_str(format!("var {}", s)).parse_decl(Parser::parse_var_spec);
+
+        assert!(vars("a int").is_ok());
+        assert!(vars("a = 1").is_ok());
+        assert!(vars("a, b int").is_ok());
+        assert!(vars("a, b = 1, 2").is_ok());
+        assert!(vars("a, b int = 1, 2").is_ok());
+        assert!(vars("(a = 1; b int = 2)").is_ok());
+        assert!(vars("(a int; b, c int = 2, 3; e, f = 5, 6)").is_ok());
+    }
+
+    #[test]
     fn parse_expr() {
         let expr = |s| Parser::from_str(s).parse_expr();
 
@@ -1080,31 +1137,6 @@ mod test {
         assert!(ret_params("(...bool)").is_err());
         assert!(ret_params("(a int, bool)").is_err());
         assert!(ret_params("(...bool, int)").is_err());
-    }
-
-    const VAR_CODE: &'static str = r#"
-    var x1 int
-    var x2, x3 int
-    var x4 = 1
-    var x5, x6 = 1, 2
-    var x7 int = 1
-    var x8, x9 int = 1, 2
-    
-    var (
-        x10      int
-        x11, x12 int = 3, 4;
-        x15, x16     = 7, 8;
-    )
-    
-    var (x17 int = 9; x18 int = 10);
-    var (x19=11;x20 int=12;);
-    "#;
-
-    #[test]
-    fn parse_var() {
-        let vars = |s| Parser::from_str(s).parse_var();
-
-        assert!(vars(VAR_CODE).is_ok());
     }
 
     #[test]

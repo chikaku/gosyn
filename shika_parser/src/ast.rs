@@ -287,6 +287,12 @@ pub enum Expression {
     CompositeLit(CompositeLit),
 }
 
+pub struct Declaration<T> {
+    pub pos0: usize,                  // pos of var | type
+    pub pos1: Option<(usize, usize)>, // pos if '(' and ')'
+    pub specs: Vec<T>,
+}
+
 #[derive(Default)]
 pub struct VarSpec {
     pub docs: Vec<Rc<Comment>>,
@@ -295,13 +301,11 @@ pub struct VarSpec {
     pub values: Vec<Expression>,
 }
 
-#[allow(dead_code)]
-pub enum Declaration {
-    Constant,
-    Variable,
-    Type,
-    Func,
-    Method,
+pub struct TypeSpec {
+    pub docs: Vec<Rc<Comment>>,
+    pub alias: bool,
+    pub name: Ident,
+    pub typ: Type,
 }
 
 #[derive(Default)]
