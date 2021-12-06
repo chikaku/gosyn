@@ -301,6 +301,14 @@ pub struct VarSpec {
     pub values: Vec<Expression>,
 }
 
+#[derive(Default)]
+pub struct ConstSpec {
+    pub docs: Vec<Rc<Comment>>,
+    pub name: Vec<Ident>,
+    pub typ: Option<Type>,
+    pub values: Vec<Expression>,
+}
+
 pub struct TypeSpec {
     pub docs: Vec<Rc<Comment>>,
     pub alias: bool,

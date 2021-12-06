@@ -214,6 +214,7 @@ impl Parser {
 
         let mut vars = vec![];
         let mut types = vec![];
+        let mut consts = vec![];
 
         loop {
             self.skipped(Operator::SemiColon)?;
@@ -221,6 +222,7 @@ impl Parser {
             match tok {
                 token::VAR => vars.push(self.parse_decl(Parser::parse_var_spec)),
                 token::TYPE => types.push(self.parse_decl(Parser::parse_type_sepc)),
+                token::CONST => consts.push(self.parse_decl(Parser::parse_const_sepc)),
                 _ => unimplemented!(),
             }
         }
@@ -344,17 +346,40 @@ impl Parser {
         }
     }
 
-    fn parse_type_sepc(&mut self) -> Result<ast::TypeSpec> {
-        let docs = vec![];
-        let name = self.parse_ident()?;
-        let alias = self.skipped(Operator::Assign)?;
-        let typ = self.parse_type()?;
+    fn parse_const_sepc(&mut self) -> Result<ast::ConstSpec> {
+        let mut spec = ast::ConstSpec::default();
+        spec.name = self.parse_ident_list()?;
+        match self.skipped(Operator::Assign)? {
+            true => spec.values = self.parse_expr_list()?,
+            false => {
+                if self.current_is(TokenKind::Literal(LitKind::Ident)) {
+                    spec.typ = Some(self.parse_type()?);
+                    self.expect(Operator::Assign)?;
+                    spec.values = self.parse_expr_list()?;
+                }
+            }
+        }
 
+        let pos = self.current_pos();
+        let value_count = spec.values.len();
+        match value_count {
+            0 => Ok(spec),
+            _ => match value_count.cmp(&spec.name.len()) {
+                std::cmp::Ordering::Equal => Ok(spec),
+                std::cmp::Ordering::Less => Err(self.else_error_at(pos, "mission init expression")),
+                std::cmp::Ordering::Greater => {
+                    Err(self.else_error_at(pos, "extra init expression"))
+                }
+            },
+        }
+    }
+
+    fn parse_type_sepc(&mut self) -> Result<ast::TypeSpec> {
         Ok(ast::TypeSpec {
-            docs,
-            name,
-            alias,
-            typ,
+            docs: vec![],
+            name: self.parse_ident()?,
+            alias: self.skipped(Operator::Assign)?,
+            typ: self.parse_type()?,
         })
     }
 
@@ -991,6 +1016,23 @@ mod test {
     use crate::parser::Parser;
 
     #[test]
+    fn parse_const() {
+        let consts =
+            |s| Parser::from_str(format!("const {}", s)).parse_decl(Parser::parse_const_sepc);
+
+        assert!(consts("a = 1").is_ok());
+        assert!(consts("a, b, c").is_ok());
+        assert!(consts("(a; b; c)").is_ok());
+        assert!(consts("a int64 = 1").is_ok());
+        assert!(consts("a, b int64 = 1, 2").is_ok());
+        assert!(consts("(a = iota; b, c;)").is_ok());
+        assert!(consts("(a = 1; b, c = 2, 3)").is_ok());
+
+        assert!(consts("a int64;").is_err());
+        assert!(consts("(a = 1; b int; c = 3)").is_err());
+    }
+
+    #[test]
     fn parse_var() {
         let vars = |s| Parser::from_str(format!("var {}", s)).parse_decl(Parser::parse_var_spec);
 
@@ -1001,6 +1043,8 @@ mod test {
         assert!(vars("a, b int = 1, 2").is_ok());
         assert!(vars("(a = 1; b int = 2)").is_ok());
         assert!(vars("(a int; b, c int = 2, 3; e, f = 5, 6)").is_ok());
+
+        assert!(vars("a, b;").is_err());
     }
 
     #[test]

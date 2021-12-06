@@ -269,6 +269,7 @@ pub const MAP: Token = Token::Keyword(Keyword::Map);
 pub const TYPE: Token = Token::Keyword(Keyword::Type);
 pub const CHAN: Token = Token::Keyword(Keyword::Chan);
 pub const FUNC: Token = Token::Keyword(Keyword::Func);
+pub const CONST: Token = Token::Keyword(Keyword::Const);
 pub const STRUCT: Token = Token::Keyword(Keyword::Struct);
 pub const INTERFACE: Token = Token::Keyword(Keyword::Interface);
 
