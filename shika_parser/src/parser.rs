@@ -215,6 +215,7 @@ impl Parser {
         let mut vars = vec![];
         let mut types = vec![];
         let mut consts = vec![];
+        let mut funcs = vec![];
 
         loop {
             self.skipped(Operator::SemiColon)?;
@@ -223,6 +224,7 @@ impl Parser {
                 token::VAR => vars.push(self.parse_decl(Parser::parse_var_spec)),
                 token::TYPE => types.push(self.parse_decl(Parser::parse_type_sepc)),
                 token::CONST => consts.push(self.parse_decl(Parser::parse_const_sepc)),
+                token::FUNC => funcs.push(self.parse_func_decl()?),
                 _ => unimplemented!(),
             }
         }
@@ -317,6 +319,22 @@ impl Parser {
         specs.push(parse_spec(self)?);
         self.skipped(Operator::SemiColon)?;
         Ok(Declaration { pos0, specs, pos1 })
+    }
+
+    fn parse_func_decl(&mut self) -> Result<ast::FuncDecl> {
+        self.expect(Keyword::Func)?;
+        let name = self.parse_ident()?;
+        let params = self.parse_func_signature()?;
+
+        Ok(ast::FuncDecl { name, params })
+    }
+
+    #[allow(dead_code)]
+    fn parse_block(&mut self) -> Result<ast::Block> {
+        let pos0 = self.expect(Operator::BraceLeft)?;
+        let pos1 = self.expect(Operator::BarackRight)?;
+        let pos = (pos0, pos1);
+        Ok(ast::Block { pos })
     }
 
     fn parse_var_spec(&mut self) -> Result<ast::VarSpec> {
@@ -469,12 +487,8 @@ impl Parser {
             )
         }
 
-        let pos2 = self.expect(Operator::BraceRight)?;
-        Ok(ast::InterfaceType {
-            pos: (pos1, pos2),
-            methods,
-        }
-        .into())
+        let pos = (pos1, self.expect(Operator::BraceRight)?);
+        Ok(ast::InterfaceType { pos, methods }.into())
     }
 
     fn parse_type_name(&mut self) -> Result<ast::TypeName> {
@@ -588,11 +602,25 @@ impl Parser {
     }
 
     pub fn parse_expr(&mut self) -> Result<ast::Expression> {
-        self.parse_binary_expr()
+        self.parse_binary_expr(1)
     }
 
-    fn parse_binary_expr(&mut self) -> Result<ast::Expression> {
-        self.parse_unary_expr()
+    fn parse_binary_expr(&mut self, prec: usize) -> Result<ast::Expression> {
+        let mut expr = self.parse_unary_expr()?;
+        while let Some((perc1, op)) = self.current.as_ref().and_then(|(_, tok)| match tok {
+            Token::Operator(op) => (op.precedence() >= prec).then_some((op.precedence(), *op)),
+            _ => None,
+        }) {
+            expr = ast::BinaryExpression {
+                op,
+                pos: self.expect(op)?,
+                left: Box::new(expr),
+                right: Box::new(self.parse_binary_expr(perc1 + 1)?),
+            }
+            .into()
+        }
+
+        Ok(expr)
     }
 
     fn parse_unary_expr(&mut self) -> Result<ast::Expression> {
@@ -1056,6 +1084,14 @@ mod test {
         assert!(expr("<-chan chan int").is_ok());
         assert!(expr("<-chan chan<- int").is_ok());
         assert!(expr("<-chan <-chan <-chan int").is_ok());
+
+        println!("{:#?}", expr("a + b"));
+        println!("{:#?}", expr("a + b * c + d"));
+        println!("{:#?}", expr("a * b + c * d"));
+
+        assert!(expr("a + b").is_ok());
+        assert!(expr("a + b * c + d").is_ok());
+        assert!(expr("a * b + c * d").is_ok());
 
         assert!(expr("<-chan <-chan <- int").is_err());
     }

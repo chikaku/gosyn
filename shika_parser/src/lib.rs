@@ -2,6 +2,7 @@
 #![feature(assert_matches)]
 #![feature(bool_to_option)]
 #![feature(trait_alias)]
+#![feature(custom_inner_attributes)]
 
 mod ast;
 mod error;

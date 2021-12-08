@@ -186,6 +186,34 @@ pub enum Token {
     Literal(LitKind, String),
 }
 
+impl Operator {
+    #![rustfmt::skip]
+    pub fn precedence(&self) -> usize {
+        match self {
+            | Operator::OrOr => 1,
+            | Operator::AndAnd => 2,
+            | Operator::Equal
+            | Operator::NotEqual
+            | Operator::Less
+            | Operator::Greater
+            | Operator::LessEqual
+            | Operator::GreaterEqual => 3,
+            | Operator::Add 
+            | Operator::Sub 
+            | Operator::Or 
+            | Operator::Xor => 4,
+            | Operator::Star
+            | Operator::Quo
+            | Operator::Rem
+            | Operator::Shl
+            | Operator::Shr
+            | Operator::And
+            | Operator::AndNot => 5,
+            _ => 0,
+        }
+    }
+}
+
 impl Debug for Token {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -218,6 +246,13 @@ impl Token {
 
     pub fn is<K: Into<TokenKind>>(&self, exp: K) -> bool {
         self.kind() == exp.into()
+    }
+
+    pub fn precedence(&self) -> Option<(Operator, usize)> {
+        match self {
+            Token::Operator(op) => Some((*op, op.precedence())),
+            _ => None,
+        }
     }
 }
 

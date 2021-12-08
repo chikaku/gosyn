@@ -253,6 +253,14 @@ pub struct UnaryExpression {
 }
 
 #[derive(Debug, Clone)]
+pub struct BinaryExpression {
+    pub pos: usize,
+    pub op: Operator,
+    pub left: Box<Expression>,
+    pub right: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
 pub struct ParenExpression {
     pub pos: (usize, usize),
     pub expr: Box<Expression>,
@@ -283,6 +291,7 @@ pub enum Expression {
     Star(StarExpression),
     Paren(ParenExpression),
     Unary(UnaryExpression),
+    Binary(BinaryExpression),
     TypeAssert(TypeAssertion),
     CompositeLit(CompositeLit),
 }
@@ -314,6 +323,15 @@ pub struct TypeSpec {
     pub alias: bool,
     pub name: Ident,
     pub typ: Type,
+}
+
+pub struct FuncDecl {
+    pub name: Ident,
+    pub params: (Vec<Params>, Vec<Params>),
+}
+
+pub struct Block {
+    pub pos: (usize, usize),
 }
 
 #[derive(Default)]
