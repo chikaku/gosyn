@@ -66,8 +66,15 @@ pub struct MapType {
 #[derive(Debug, Clone)]
 pub struct Field {
     pub name: Vec<Ident>,
-    pub typ: Type,
+    pub typ: Expression,
     pub tag: Option<StringLit>,
+    // TODO: doc and line comment
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FieldList {
+    pub pos: Option<(usize, usize)>,
+    pub list: Vec<Field>,
 }
 
 #[derive(Debug, Clone)]
@@ -76,26 +83,11 @@ pub struct StructType {
     pub fields: Vec<Field>,
 }
 
-#[derive(Debug, Clone)]
-pub struct Params {
-    pub name: Vec<Ident>,
-    pub typ: (Box<Type>, bool),
-}
-
-impl From<Ident> for Params {
-    fn from(id: Ident) -> Self {
-        Params {
-            name: Vec::new(),
-            typ: (Box::new(id.into()), false),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct FunctionType {
+#[derive(Debug, Clone, Default)]
+pub struct FuncType {
     pub pos: usize,
-    pub input: Vec<Params>,
-    pub output: Vec<Params>,
+    pub params: FieldList,
+    pub result: FieldList,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -112,19 +104,9 @@ pub struct ChannelType {
 }
 
 #[derive(Debug, Clone)]
-pub enum InterfaceElem {
-    Embed(TypeName),
-    Method {
-        name: Ident,
-        input: Vec<Params>,
-        output: Vec<Params>,
-    },
-}
-
-#[derive(Debug, Clone)]
 pub struct InterfaceType {
-    pub pos: (usize, usize),
-    pub methods: Vec<InterfaceElem>,
+    pub pos: usize,
+    pub methods: FieldList,
 }
 
 #[derive(Clone, Debug, EnumFromWrapped, EnumIntoWrapped)]
@@ -133,16 +115,46 @@ pub enum Type {
     Ident(TypeName),          // pkg.Type
     Array(ArrayType),         // [N]T
     Slice(SliceType),         // []T
+    Function(FuncType),       // func (...) ...
     Struct(StructType),       // struct { ... }
     Channel(ChannelType),     // <-chan T | chan<- T | chan T
     Pointer(PointerType),     // *T
-    Function(FunctionType),   // func (...) ...
     Interface(InterfaceType), // interface { ... }
 }
 
 impl From<Ident> for Type {
     fn from(id: Ident) -> Self {
         Self::Ident(id.into())
+    }
+}
+
+impl From<Ident> for Field {
+    fn from(id: Ident) -> Self {
+        Self {
+            name: vec![],
+            typ: Expression::Type(id.into()),
+            tag: None,
+        }
+    }
+}
+
+impl From<TypeName> for Field {
+    fn from(id: TypeName) -> Self {
+        Self {
+            name: vec![],
+            typ: id.into(),
+            tag: None,
+        }
+    }
+}
+
+impl From<Type> for Field {
+    fn from(typ: Type) -> Self {
+        Self {
+            name: vec![],
+            typ: Expression::Type(typ),
+            tag: None,
+        }
     }
 }
 
@@ -172,9 +184,8 @@ impl From<BasicLit> for StringLit {
 }
 
 #[derive(Debug, Clone)]
-pub struct FunctionLit {
-    pub input: Vec<Params>,
-    pub output: Vec<Params>,
+pub struct FuncLit {
+    pub typ: FuncType,
     // body: Option<Statement>,
 }
 
@@ -275,6 +286,7 @@ pub struct StarExpression {
 #[derive(Debug, Clone)]
 pub struct Ellipsis {
     pub pos: usize,
+    pub elt: Option<Type>,
 }
 
 #[derive(Debug, Clone, EnumFromWrapped, EnumIntoWrapped)]
@@ -284,16 +296,26 @@ pub enum Expression {
     Index(Index),
     Slice(Slice),
     Ident(TypeName),
+    FuncLit(FuncLit),
     Ellipsis(Ellipsis),
     Selector(Selector),
     BasicLit(BasicLit),
-    FuncLit(FunctionLit),
     Star(StarExpression),
     Paren(ParenExpression),
     Unary(UnaryExpression),
     Binary(BinaryExpression),
     TypeAssert(TypeAssertion),
     CompositeLit(CompositeLit),
+}
+
+impl From<Ellipsis> for Field {
+    fn from(ell: Ellipsis) -> Self {
+        Self {
+            name: vec![],
+            typ: Expression::Ellipsis(ell),
+            tag: None,
+        }
+    }
 }
 
 pub struct Declaration<T> {
@@ -327,7 +349,7 @@ pub struct TypeSpec {
 
 pub struct FuncDecl {
     pub name: Ident,
-    pub params: (Vec<Params>, Vec<Params>),
+    pub typ: FuncType,
 }
 
 pub struct Block {

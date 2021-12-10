@@ -298,6 +298,7 @@ pub const LBARACK: Token = Token::Operator(Operator::BarackLeft);
 pub const RBARACK: Token = Token::Operator(Operator::BarackRight);
 pub const LBRACE: Token = Token::Operator(Operator::BraceLeft);
 pub const RBRACE: Token = Token::Operator(Operator::BraceRight);
+pub const SEMICOLON: Token = Token::Operator(Operator::SemiColon);
 
 pub const VAR: Token = Token::Keyword(Keyword::Var);
 pub const MAP: Token = Token::Keyword(Keyword::Map);
