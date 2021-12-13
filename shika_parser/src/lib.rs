@@ -7,8 +7,6 @@
 mod ast;
 mod error;
 mod parser;
-mod parser_decl;
-mod parser_expr;
 mod scanner;
 mod token;
 

@@ -311,7 +311,6 @@ pub const INTERFACE: Token = Token::Keyword(Keyword::Interface);
 
 // alias to some often used token kind
 pub const KIND_IDENT: TokenKind = TokenKind::Literal(LitKind::Ident);
-
 pub const KIND_COMMA: TokenKind = TokenKind::Operator(Operator::Comma);
 pub const KIND_COLON: TokenKind = TokenKind::Operator(Operator::Colon);
 pub const KIND_LPAREN: TokenKind = TokenKind::Operator(Operator::ParenLeft);

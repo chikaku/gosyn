@@ -251,9 +251,10 @@ pub struct Slice {
 
 #[derive(Debug, Clone)]
 pub struct Call {
-    pub pos: (usize, usize, usize), // third pos > 0 means the ellipsis argument
+    pub pos: (usize, usize), // third pos > 0 means the ellipsis argument
     pub args: Vec<Expression>,
     pub left: Box<Expression>,
+    pub ellipsis: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -318,9 +319,9 @@ impl From<Ellipsis> for Field {
     }
 }
 
-pub struct Declaration<T> {
-    pub pos0: usize,                  // pos of var | type
-    pub pos1: Option<(usize, usize)>, // pos if '(' and ')'
+pub struct Decl<T> {
+    pub pos0: usize,                  // pos of var | const | type
+    pub pos1: Option<(usize, usize)>, // pos of '(' and ')'
     pub specs: Vec<T>,
 }
 
@@ -352,19 +353,12 @@ pub struct FuncDecl {
     pub typ: FuncType,
 }
 
-pub struct Block {
-    pub pos: (usize, usize),
-}
-
-#[derive(Default)]
-pub struct File {
-    pub path: PathBuf,
-    pub line_info: Vec<usize>,
-
-    pub name: Ident,
-    pub comments: Vec<Rc<Comment>>,
-    pub document: Vec<Rc<Comment>>,
-    pub imports: Vec<Import>,
+#[derive(EnumFromWrapped)]
+pub enum Declaration {
+    Function(FuncDecl),
+    Type(Decl<TypeSpec>),
+    Const(Decl<ConstSpec>),
+    Variable(Decl<VarSpec>),
 }
 
 #[derive(Default, Debug)]
@@ -372,4 +366,16 @@ pub struct Import {
     pub docs: Vec<Rc<Comment>>,
     pub name: Option<Ident>,
     pub path: StringLit,
+}
+
+#[derive(Default)]
+pub struct File {
+    pub path: PathBuf,
+    pub line_info: Vec<usize>,
+
+    pub pkg_name: Ident,
+    pub document: Vec<Rc<Comment>>,
+    pub comments: Vec<Rc<Comment>>,
+    pub imports: Vec<Import>,
+    pub decl: Vec<Declaration>,
 }
