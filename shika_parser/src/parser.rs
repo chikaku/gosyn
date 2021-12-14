@@ -598,19 +598,20 @@ impl Parser {
                 ast::UnaryExpression { pos, op, right }.into()
             }
             token::ARROW => {
-                // channel type or receive expression
-                // (<-chan int)(x) | <- message
                 self.next()?;
-                let expr = self.parse_unary_expr()?;
-                let expr2 = expr.clone();
-                if let Ok(typ) = expr2.try_into().and_then(|t: ast::Type| t.try_into()) {
-                    let chan_type = self.reset_chan_arrow(pos, typ);
-                    return Ok(ast::Type::Channel(chan_type?).into());
+                match self.parse_unary_expr()? {
+                    // <- CHAN_TYPE => <-chan T
+                    ast::Expression::Type(ast::Type::Channel(chtyp)) => {
+                        let chan_type = self.reset_chan_arrow(pos, chtyp)?;
+                        ast::Type::Channel(chan_type).into()
+                    }
+                    // receive message
+                    expr @ _ => {
+                        let op = Operator::Arrow;
+                        let right = Box::new(expr);
+                        ast::UnaryExpression { pos, op, right }.into()
+                    }
                 }
-
-                let op = Operator::Arrow;
-                let right = Box::new(expr);
-                ast::UnaryExpression { pos, op, right }.into()
             }
             token::STAR => {
                 self.next()?;
@@ -621,8 +622,12 @@ impl Parser {
         })
     }
 
-    /// reset the channel direction of expression `<- typ` (typ is a channel type)
-    fn reset_chan_arrow(&mut self, pos: usize, mut typ: ChannelType) -> Result<ast::ChannelType> {
+    /// reset the channel direction of expression `<- chan_typ`
+    fn reset_chan_arrow<'a>(
+        &mut self,
+        pos: usize,
+        mut typ: ChannelType,
+    ) -> Result<ast::ChannelType> {
         match typ.dir {
             Some(ast::ChanMode::Recv) => {
                 // <- <-chan T
@@ -639,7 +644,8 @@ impl Parser {
                 match *typ.typ {
                     // <-chan <-chan T
                     ast::Type::Channel(chan_type) => {
-                        typ.typ = Box::new(self.reset_chan_arrow(typ.pos.1, chan_type)?.into());
+                        let chan_type = self.reset_chan_arrow(typ.pos.1, chan_type)?;
+                        typ.typ = Box::new(ast::Type::Channel(chan_type).into());
                         typ.dir = Some(ast::ChanMode::Recv);
                         typ.pos = (typ.pos.0, pos);
                         Ok(typ)
@@ -720,7 +726,8 @@ impl Parser {
                 Ok((
                     match is_index {
                         true => {
-                            let index = index[0].to_owned().expect("index should't be empty");
+                            let [index, ..] = index;
+                            let index = index.expect("index should't be empty");
                             ast::Index { pos, left, index }.into()
                         }
                         false => ast::Slice { pos, left, index }.into(),
@@ -841,7 +848,12 @@ impl Parser {
     /// function literal is an anonymous function
     fn parse_func_lit(&mut self) -> Result<ast::FuncLit> {
         let typ = self.parse_func_type()?;
-        Ok(ast::FuncLit { typ })
+        let body = self
+            .current_is(Operator::BraceLeft)
+            .then(|| self.parse_block_stmt())
+            .map_or(Ok(None), |x| x.map(Some))?;
+
+        Ok(ast::FuncLit { typ, body })
     }
 
     /// parse params list like  
@@ -994,12 +1006,97 @@ impl Parser {
 
         Ok(f)
     }
+
+    fn parse_stmt(&mut self) -> Result<ast::Statement> {
+        let (pos, tok) = self.get_current()?;
+        match tok {
+            Token::Literal(..)
+            | Token::Keyword(
+                Keyword::Func | Keyword::Struct | Keyword::Map | Keyword::Chan | Keyword::Interface,
+            )
+            | Token::Operator(
+                Operator::Add
+                | Operator::Sub
+                | Operator::Star
+                | Operator::Xor
+                | Operator::Arrow
+                | Operator::Not
+                | Operator::ParenLeft
+                | Operator::BarackLeft,
+            ) => {
+                unimplemented!()
+            }
+            token::VAR | token::TYPE | token::CONST => self.parse_decl_stmt().map(|d| d.into()),
+            Token::Operator(Operator::BraceLeft) => Ok(self.parse_block_stmt()?.into()),
+            Token::Keyword(Keyword::Go) => Ok(self.parse_go_stmt()?.into()),
+            Token::Keyword(Keyword::Defer) => Ok(self.parse_defer_stmt()?.into()),
+            Token::Keyword(Keyword::Return) => Ok(self.parse_return_stmt()?.into()),
+            Token::Keyword(Keyword::If) => unimplemented!(),
+            Token::Keyword(
+                key @ (Keyword::Break | Keyword::FallThrough | Keyword::Continue | Keyword::Goto),
+            ) => Ok(self.parse_branch_stmt(key)?.into()),
+            _ => unimplemented!(),
+        }
+    }
+
+    fn parse_decl_stmt(&mut self) -> Result<ast::DeclStmt> {
+        Ok(match self.get_current().map(|(_, tok)| tok)? {
+            token::VAR => self.parse_decl(Parser::parse_var_spec)?.into(),
+            token::TYPE => self.parse_decl(Parser::parse_type_sepc)?.into(),
+            token::CONST => self.parse_decl(Parser::parse_const_sepc)?.into(),
+            _ => unreachable!("must call at var | const | type"),
+        })
+    }
+
+    fn parse_block_stmt(&mut self) -> Result<ast::BlockStmt> {
+        let mut list = vec![];
+        let pos0 = self.expect(Operator::BraceLeft)?;
+        while !self.current_is(Operator::BraceRight) {
+            list.push(self.parse_stmt()?);
+        }
+
+        let pos = (pos0, self.expect(Operator::BraceRight)?);
+        Ok(ast::BlockStmt { pos, list })
+    }
+
+    fn parse_go_stmt(&mut self) -> Result<ast::GoStmt> {
+        let pos = self.expect(Keyword::Go)?;
+        match self.parse_expr()? {
+            ast::Expression::Call(call) => Ok(ast::GoStmt { pos, call }),
+            _ => Err(self.else_error_at(pos + 2, "must be invoked function after go")),
+        }
+    }
+
+    fn parse_defer_stmt(&mut self) -> Result<ast::DeferStmt> {
+        let pos = self.expect(Keyword::Defer)?;
+        match self.parse_expr()? {
+            ast::Expression::Call(call) => Ok(ast::DeferStmt { pos, call }),
+            _ => Err(self.else_error_at(pos + 2, "must be invoked function after go")),
+        }
+    }
+
+    fn parse_return_stmt(&mut self) -> Result<ast::ReturnStmt> {
+        let pos = self.expect(Keyword::Return)?;
+        let ret = self.parse_expr_list()?;
+        Ok(ast::ReturnStmt { pos, ret })
+    }
+
+    fn parse_branch_stmt(&mut self, key: Keyword) -> Result<ast::BranchStmt> {
+        let pos = self.expect(key)?;
+        let ident = ((key != Keyword::FallThrough) && self.current_is(token::KIND_IDENT))
+            .then(|| self.parse_ident())
+            .map_or(Ok(None), |r| r.map(Some))?;
+        Ok(ast::BranchStmt { pos, key, ident })
+    }
+
+    fn parse_if_stmt(&mut self) -> Result<ast::IfStmt> {
+        let pos = self.expect(Keyword::If)?;
+        unimplemented!()
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use std::assert_matches::assert_matches;
-
     use crate::ast::{ChanMode, ChannelType, Type};
     use crate::parser::Parser;
 
@@ -1181,30 +1278,35 @@ mod test {
     fn parse_type() {
         let type_of = |x| Parser::from_str(x).parse_type().ok();
 
-        assert_matches!(type_of("int"), Some(Type::Ident(_)));
-        assert_matches!(type_of("int"), Some(Type::Ident(_)));
-        assert_matches!(type_of("((int))"), Some(Type::Ident(_)));
-        assert_matches!(type_of("a.b;"), Some(Type::Ident(..)));
-        assert_matches!(type_of("[]int;"), Some(Type::Slice(..)));
-        assert_matches!(type_of("map[int]map[int]int;"), Some(Type::Map(..)));
+        assert!(matches!(type_of("int"), Some(Type::Ident(_))));
+        assert!(matches!(type_of("int"), Some(Type::Ident(_))));
+        assert!(matches!(type_of("int"), Some(Type::Ident(_))));
+        assert!(matches!(type_of("((int))"), Some(Type::Ident(_))));
 
-        assert_matches!(type_of("chan int;"), Some(Type::Channel(..)));
+        assert!(matches!(type_of("a.b;"), Some(Type::Ident(..))));
+        assert!(matches!(type_of("[]int;"), Some(Type::Slice(..))));
+        assert!(matches!(
+            type_of("map[int]map[int]int;"),
+            Some(Type::Map(..))
+        ));
 
-        assert_matches!(
+        assert!(matches!(type_of("chan int;"), Some(Type::Channel(..))));
+
+        assert!(matches!(
             type_of("<-chan <- chan int;"),
             Some(Type::Channel(ChannelType {
                 dir: Some(ChanMode::Recv),
                 ..
             }))
-        );
+        ));
 
-        assert_matches!(
+        assert!(matches!(
             type_of("chan<- int;"),
             Some(Type::Channel(ChannelType {
                 dir: Some(ChanMode::Send),
                 ..
             }))
-        );
+        ));
     }
 
     #[test]

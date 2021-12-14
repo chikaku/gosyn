@@ -1,3 +1,4 @@
+use crate::Keyword;
 use crate::LitKind;
 use crate::Operator;
 use crate::Pos;
@@ -8,13 +9,12 @@ use shika_proc_macro::EnumFrom;
 use shika_proc_macro::EnumFromWrapped;
 use shika_proc_macro::EnumIntoWrapped;
 
-#[derive(Default, Debug)]
 pub struct Comment {
     pub pos: Pos,
     pub text: String,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default)]
 pub struct Ident {
     pub pos: usize,
     pub name: String,
@@ -22,7 +22,6 @@ pub struct Ident {
 
 // ================ Type Definition ================
 
-#[derive(Debug, Clone)]
 pub struct TypeName {
     pub pkg: Option<Ident>,
     pub name: Ident,
@@ -37,33 +36,28 @@ impl From<Ident> for TypeName {
     }
 }
 
-#[derive(Debug, Clone)]
 pub struct PointerType {
     pub pos: usize,
     pub typ: Box<Type>,
 }
 
-#[derive(Debug, Clone)]
 pub struct ArrayType {
     pub pos: (usize, usize),
     pub len: Box<Expression>,
     pub typ: Box<Type>,
 }
 
-#[derive(Debug, Clone)]
 pub struct SliceType {
     pub pos: usize,
     pub typ: Box<Type>,
 }
 
-#[derive(Debug, Clone)]
 pub struct MapType {
     pub pos: (usize, usize),
     pub key: Box<Type>,
     pub val: Box<Type>,
 }
 
-#[derive(Debug, Clone)]
 pub struct Field {
     pub name: Vec<Ident>,
     pub typ: Expression,
@@ -71,45 +65,42 @@ pub struct Field {
     // TODO: doc and line comment
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Default)]
 pub struct FieldList {
     pub pos: Option<(usize, usize)>,
     pub list: Vec<Field>,
 }
 
-#[derive(Debug, Clone)]
 pub struct StructType {
     pub pos: (usize, usize),
     pub fields: Vec<Field>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Default)]
 pub struct FuncType {
     pub pos: usize,
     pub params: FieldList,
     pub result: FieldList,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(PartialEq)]
 pub enum ChanMode {
     Send,
     Recv,
 }
 
-#[derive(Debug, Clone)]
 pub struct ChannelType {
     pub pos: (usize, usize), // chan, <-
     pub dir: Option<ChanMode>,
     pub typ: Box<Type>,
 }
 
-#[derive(Debug, Clone)]
 pub struct InterfaceType {
     pub pos: usize,
     pub methods: FieldList,
 }
 
-#[derive(Clone, Debug, EnumFromWrapped, EnumIntoWrapped)]
+#[derive(EnumFromWrapped, EnumIntoWrapped)]
 pub enum Type {
     Map(MapType),             // map[K]V
     Ident(TypeName),          // pkg.Type
@@ -160,14 +151,13 @@ impl From<Type> for Field {
 
 // ================ Expression Definition ================
 
-#[derive(Debug, Clone)]
 pub struct BasicLit {
     pub pos: usize,
     pub kind: LitKind,
     pub value: String,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default)]
 pub struct StringLit {
     pub pos: usize,
     pub value: String,
@@ -183,13 +173,12 @@ impl From<BasicLit> for StringLit {
     }
 }
 
-#[derive(Debug, Clone)]
 pub struct FuncLit {
     pub typ: FuncType,
-    // body: Option<Statement>,
+    pub body: Option<BlockStmt>,
 }
 
-#[derive(Debug, Clone, EnumFrom)]
+#[derive(EnumFrom)]
 pub enum Element {
     #[enum_from(inner)]
     Expr(Expression),
@@ -197,59 +186,44 @@ pub enum Element {
     LitValue(LiteralValue),
 }
 
-#[derive(Debug, Clone)]
 pub struct KeyedElement {
     pub key: Option<Element>,
     pub val: Element,
 }
 
-#[derive(Debug, Clone)]
 pub struct LiteralValue {
     pub pos: (usize, usize),
     pub values: Vec<KeyedElement>,
 }
 
-#[derive(Debug, Clone)]
 pub struct CompositeLit {
     pub typ: Box<Expression>,
     pub val: LiteralValue,
 }
 
-#[derive(Debug, Clone)]
-pub struct Conversion {
-    pub pos: (usize, usize),
-    pub typ: Box<Type>,
-    pub expr: Box<Expression>,
-}
-
-#[derive(Debug, Clone)]
 pub struct Selector {
     pub pos: usize,
     pub right: Ident,
     pub left: Box<Expression>,
 }
 
-#[derive(Debug, Clone)]
 pub struct TypeAssertion {
     pub left: Box<Expression>,
     pub right: Option<Type>,
 }
 
-#[derive(Debug, Clone)]
 pub struct Index {
     pub pos: (usize, usize),
     pub left: Box<Expression>,
     pub index: Box<Expression>,
 }
 
-#[derive(Debug, Clone)]
 pub struct Slice {
     pub pos: (usize, usize),
     pub left: Box<Expression>,
     pub index: [Option<Box<Expression>>; 3],
 }
 
-#[derive(Debug, Clone)]
 pub struct Call {
     pub pos: (usize, usize), // third pos > 0 means the ellipsis argument
     pub args: Vec<Expression>,
@@ -257,14 +231,12 @@ pub struct Call {
     pub ellipsis: Option<usize>,
 }
 
-#[derive(Debug, Clone)]
 pub struct UnaryExpression {
     pub pos: usize,
     pub op: Operator,
     pub right: Box<Expression>,
 }
 
-#[derive(Debug, Clone)]
 pub struct BinaryExpression {
     pub pos: usize,
     pub op: Operator,
@@ -272,25 +244,22 @@ pub struct BinaryExpression {
     pub right: Box<Expression>,
 }
 
-#[derive(Debug, Clone)]
 pub struct ParenExpression {
     pub pos: (usize, usize),
     pub expr: Box<Expression>,
 }
 
-#[derive(Debug, Clone)]
 pub struct StarExpression {
     pub pos: usize,
     pub right: Box<Expression>,
 }
 
-#[derive(Debug, Clone)]
 pub struct Ellipsis {
     pub pos: usize,
     pub elt: Option<Type>,
 }
 
-#[derive(Debug, Clone, EnumFromWrapped, EnumIntoWrapped)]
+#[derive(EnumFromWrapped, EnumIntoWrapped)]
 pub enum Expression {
     Type(Type),
     Call(Call),
@@ -318,6 +287,8 @@ impl From<Ellipsis> for Field {
         }
     }
 }
+
+// ================ Declaration Definition ================
 
 pub struct Decl<T> {
     pub pos0: usize,                  // pos of var | const | type
@@ -361,7 +332,61 @@ pub enum Declaration {
     Variable(Decl<VarSpec>),
 }
 
-#[derive(Default, Debug)]
+// ================ Statement Definition ================
+
+pub struct BlockStmt {
+    pub pos: (usize, usize),
+    pub list: Vec<Statement>,
+}
+
+#[derive(EnumFromWrapped)]
+pub enum DeclStmt {
+    Type(Decl<TypeSpec>),
+    Const(Decl<ConstSpec>),
+    Variable(Decl<VarSpec>),
+}
+
+pub struct GoStmt {
+    pub pos: usize,
+    pub call: Call,
+}
+
+pub struct DeferStmt {
+    pub pos: usize,
+    pub call: Call,
+}
+
+pub struct ReturnStmt {
+    pub pos: usize,
+    pub ret: Vec<Expression>,
+}
+
+pub struct BranchStmt {
+    pub pos: usize,
+    pub key: Keyword,
+    pub ident: Option<Ident>,
+}
+
+pub struct IfStmt {
+    pub pos: usize,
+    pub init: Option<Box<Statement>>,
+    pub cond: Expression,
+    pub body: BlockStmt,
+    pub else_: Box<Statement>,
+}
+
+#[derive(EnumFromWrapped)]
+pub enum Statement {
+    Go(GoStmt),
+    If(IfStmt),
+    Defer(DeferStmt),
+    Return(ReturnStmt),
+    Block(BlockStmt),
+    Branch(BranchStmt),
+    Declaration(DeclStmt),
+}
+
+#[derive(Default)]
 pub struct Import {
     pub docs: Vec<Rc<Comment>>,
     pub name: Option<Ident>,
