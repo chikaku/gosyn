@@ -259,6 +259,11 @@ pub struct Ellipsis {
     pub elt: Option<Type>,
 }
 
+pub struct RangeExpr {
+    pub pos: usize,
+    pub right: Box<Expression>,
+}
+
 #[derive(EnumFromWrapped, EnumIntoWrapped)]
 pub enum Expression {
     Type(Type),
@@ -270,6 +275,7 @@ pub enum Expression {
     Ellipsis(Ellipsis),
     Selector(Selector),
     BasicLit(BasicLit),
+    Range(RangeExpr),
     Star(StarExpression),
     Paren(ParenExpression),
     Unary(UnaryExpression),
@@ -375,13 +381,48 @@ pub struct IfStmt {
     pub else_: Box<Statement>,
 }
 
+pub struct AssignStmt {
+    // position of assign operator like = | += | &=
+    pub pos: usize,
+    pub op: Operator,
+    pub left: Vec<Expression>,
+    pub right: Vec<Expression>,
+}
+
+pub struct LabelStmt {
+    pub pos: usize,
+    pub name: Ident,
+    pub stmt: Box<Statement>,
+}
+
+pub struct SendStmt {
+    pub pos: usize,
+    pub chan: Expression,
+    pub value: Expression,
+}
+
+pub struct ExprStmt {
+    pub expr: Expression,
+}
+
+pub struct IncDecStmt {
+    pub pos: usize,
+    pub op: Operator,
+    pub expr: Expression,
+}
+
 #[derive(EnumFromWrapped)]
 pub enum Statement {
     Go(GoStmt),
     If(IfStmt),
+    Send(SendStmt),
+    Expr(ExprStmt),
     Defer(DeferStmt),
-    Return(ReturnStmt),
     Block(BlockStmt),
+    Label(LabelStmt),
+    IncDec(IncDecStmt),
+    Assign(AssignStmt),
+    Return(ReturnStmt),
     Branch(BranchStmt),
     Declaration(DeclStmt),
 }

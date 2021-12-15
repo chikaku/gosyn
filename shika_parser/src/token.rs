@@ -288,6 +288,8 @@ impl Debug for TokenKind {
 }
 
 /// alias to some often used token
+pub const INC: Token = Token::Operator(Operator::Inc);
+pub const DEC: Token = Token::Operator(Operator::Dec);
 pub const STAR: Token = Token::Operator(Operator::Star);
 pub const COLON: Token = Token::Operator(Operator::Colon);
 pub const ARROW: Token = Token::Operator(Operator::Arrow);

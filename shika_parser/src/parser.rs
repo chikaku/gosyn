@@ -1,5 +1,5 @@
-use crate::ast;
 use crate::ast::ChanMode;
+use crate::ast::{self};
 use crate::ast::{BasicLit, ChannelType};
 use crate::scanner::{PosTok, Scanner};
 use crate::token;
@@ -607,7 +607,7 @@ impl Parser {
                     }
                     // receive message
                     expr @ _ => {
-                        let op = Operator::Arrow;
+                        let op = Operator::Arrow.into();
                         let right = Box::new(expr);
                         ast::UnaryExpression { pos, op, right }.into()
                     }
@@ -1023,9 +1023,7 @@ impl Parser {
                 | Operator::Not
                 | Operator::ParenLeft
                 | Operator::BarackLeft,
-            ) => {
-                unimplemented!()
-            }
+            ) => self.parse_simple_stmt(),
             token::VAR | token::TYPE | token::CONST => self.parse_decl_stmt().map(|d| d.into()),
             Token::Operator(Operator::BraceLeft) => Ok(self.parse_block_stmt()?.into()),
             Token::Keyword(Keyword::Go) => Ok(self.parse_go_stmt()?.into()),
@@ -1037,6 +1035,94 @@ impl Parser {
             ) => Ok(self.parse_branch_stmt(key)?.into()),
             _ => unimplemented!(),
         }
+    }
+
+    fn parse_range_expr(&mut self) -> Result<ast::RangeExpr> {
+        let pos = self.expect(Keyword::Range)?;
+        let right = Box::new(self.parse_expr()?);
+        Ok(ast::RangeExpr { pos, right })
+    }
+
+    fn parse_simple_stmt(&mut self) -> Result<ast::Statement> {
+        let left = self.parse_expr_list()?;
+        let (pos, tok) = self.get_current()?;
+        let current = self.next()?.map(|(_, tok)| tok).expect("Unexpected EOF");
+
+        if let Token::Operator(
+            op @ (Operator::Define
+            | Operator::Assign
+            | Operator::AddAssign
+            | Operator::SubAssign
+            | Operator::MulAssign
+            | Operator::QuoAssign
+            | Operator::RemAssign
+            | Operator::AndAssign
+            | Operator::OrAssign
+            | Operator::XorAssign
+            | Operator::ShlAssign
+            | Operator::ShrAssign
+            | Operator::AndNotAssign),
+        ) = tok
+        {
+            let right = match current.is(Keyword::Range)
+                && (op == Operator::Assign || op == Operator::Define)
+            {
+                // left := range right
+                true => vec![self.parse_range_expr()?.into()],
+                false => self.parse_expr_list()?,
+            };
+
+            (op == Operator::Define)
+                .then(|| {
+                    left.iter()
+                        .map(|expr| match expr {
+                            ast::Expression::Ident(ast::TypeName { pkg: None, .. }) => Ok(()),
+                            _ => {
+                                Err(self.else_error_at(pos, "expect idenfifier on left side of :="))
+                            }
+                        })
+                        .collect::<Result<Vec<_>>>()
+                })
+                .map_or(Ok(None), |r| r.map(Some))?;
+
+            // TODO: check define left is ident
+            return Ok(ast::AssignStmt {
+                op,
+                pos,
+                left,
+                right,
+            }
+            .into());
+        }
+
+        // TODO: find a better way to check only one elements
+        let mut iter = left.into_iter();
+        let expr = match (iter.next(), iter.next()) {
+            (Some(expr), None) => expr,
+            _ => return Err(self.else_error_at(pos, "expect 1 epxression in left side")),
+        };
+
+        Ok(match self.current {
+            Some((pos, token::COLON)) => match expr {
+                ast::Expression::Ident(ast::TypeName { pkg: None, name }) => {
+                    self.next()?;
+                    let stmt = Box::new(self.parse_stmt()?);
+                    ast::LabelStmt { pos, name, stmt }.into()
+                }
+                _ => return Err(self.else_error_at(pos, "illegal label declaration")),
+            },
+            Some((pos, token::ARROW)) => {
+                let chan = expr;
+                self.next()?;
+                let value = self.parse_expr()?;
+                ast::SendStmt { pos, chan, value }.into()
+            }
+            Some((pos, Token::Operator(op @ (Operator::Inc | Operator::Dec)))) => {
+                self.next()?;
+                ast::IncDecStmt { pos, expr, op }.into()
+            }
+            _ => ast::ExprStmt { expr }.into(),
+        })
     }
 
     fn parse_decl_stmt(&mut self) -> Result<ast::DeclStmt> {
@@ -1091,6 +1177,10 @@ impl Parser {
 
     fn parse_if_stmt(&mut self) -> Result<ast::IfStmt> {
         let pos = self.expect(Keyword::If)?;
+        if !self.current_is(Operator::SemiColon) {
+            self.parse_simple_stmt()?;
+        }
+
         unimplemented!()
     }
 }
