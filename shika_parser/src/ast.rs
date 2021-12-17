@@ -29,10 +29,7 @@ pub struct TypeName {
 
 impl From<Ident> for TypeName {
     fn from(id: Ident) -> Self {
-        Self {
-            pkg: None,
-            name: id,
-        }
+        Self { pkg: None, name: id }
     }
 }
 
@@ -166,10 +163,7 @@ pub struct StringLit {
 impl From<BasicLit> for StringLit {
     fn from(lit: BasicLit) -> StringLit {
         assert_eq!(lit.kind, LitKind::String);
-        StringLit {
-            pos: lit.pos,
-            value: lit.value,
-        }
+        StringLit { pos: lit.pos, value: lit.value }
     }
 }
 
@@ -208,8 +202,9 @@ pub struct Selector {
 }
 
 pub struct TypeAssertion {
+    pub pos: (usize, usize),
     pub left: Box<Expression>,
-    pub right: Option<Type>,
+    pub right: Option<Type>, // None for x.(type)
 }
 
 pub struct Index {
@@ -389,7 +384,7 @@ pub struct AssignStmt {
     pub right: Vec<Expression>,
 }
 
-pub struct LabelStmt {
+pub struct LabeledStmt {
     pub pos: usize,
     pub name: Ident,
     pub stmt: Box<Statement>,
@@ -412,26 +407,46 @@ pub struct CaseClause {
     pub body: Vec<Box<Statement>>,
 }
 
+pub struct CaseBlock {
+    pub pos: (usize, usize),
+    pub body: Vec<CaseClause>,
+}
+
 pub struct SwitchStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
     pub tag: Option<Expression>,
-    pub body_pos: (usize, usize),
-    pub body: Vec<CaseClause>,
+    pub block: CaseBlock,
 }
 
 pub struct TypeSwitchStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
     pub tag: Option<Box<Statement>>,
-    pub body_pos: (usize, usize),
-    pub body: Vec<CaseClause>,
+    pub block: CaseBlock,
 }
 
 pub struct IncDecStmt {
     pub pos: usize,
     pub op: Operator,
     pub expr: Expression,
+}
+
+pub struct CommClause {
+    pub pos: (usize, usize), // pos of (keyword, colon)
+    pub tok: Keyword,
+    pub comm: Option<Box<Statement>>,
+    pub body: Vec<Box<Statement>>,
+}
+
+pub struct CommBlock {
+    pub pos: (usize, usize),
+    pub body: Vec<CommClause>,
+}
+
+pub struct SelectStmt {
+    pub pos: usize,
+    pub body: CommBlock,
 }
 
 #[derive(EnumFromWrapped)]
@@ -442,12 +457,13 @@ pub enum Statement {
     Expr(ExprStmt),
     Defer(DeferStmt),
     Block(BlockStmt),
-    Label(LabelStmt),
+    Label(LabeledStmt),
     IncDec(IncDecStmt),
     Assign(AssignStmt),
     Return(ReturnStmt),
     Branch(BranchStmt),
     Switch(SwitchStmt),
+    Select(SelectStmt),
     TypeSwirch(TypeSwitchStmt),
     Declaration(DeclStmt),
 }
