@@ -302,13 +302,16 @@ pub const LBRACE: Token = Token::Operator(Operator::BraceLeft);
 pub const RBRACE: Token = Token::Operator(Operator::BraceRight);
 pub const SEMICOLON: Token = Token::Operator(Operator::SemiColon);
 
+pub const IF: Token = Token::Keyword(Keyword::If);
 pub const VAR: Token = Token::Keyword(Keyword::Var);
 pub const MAP: Token = Token::Keyword(Keyword::Map);
+pub const CASE: Token = Token::Keyword(Keyword::Case);
 pub const TYPE: Token = Token::Keyword(Keyword::Type);
 pub const CHAN: Token = Token::Keyword(Keyword::Chan);
 pub const FUNC: Token = Token::Keyword(Keyword::Func);
 pub const CONST: Token = Token::Keyword(Keyword::Const);
 pub const STRUCT: Token = Token::Keyword(Keyword::Struct);
+pub const DEFAULT: Token = Token::Keyword(Keyword::Default);
 pub const INTERFACE: Token = Token::Keyword(Keyword::Interface);
 
 // alias to some often used token kind

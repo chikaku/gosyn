@@ -378,7 +378,7 @@ pub struct IfStmt {
     pub init: Option<Box<Statement>>,
     pub cond: Expression,
     pub body: BlockStmt,
-    pub else_: Box<Statement>,
+    pub else_: Option<Box<Statement>>,
 }
 
 pub struct AssignStmt {
@@ -405,6 +405,29 @@ pub struct ExprStmt {
     pub expr: Expression,
 }
 
+pub struct CaseClause {
+    pub tok: Keyword,
+    pub pos: (usize, usize),
+    pub list: Vec<Expression>,
+    pub body: Vec<Box<Statement>>,
+}
+
+pub struct SwitchStmt {
+    pub pos: usize,
+    pub init: Option<Box<Statement>>,
+    pub tag: Option<Expression>,
+    pub body_pos: (usize, usize),
+    pub body: Vec<CaseClause>,
+}
+
+pub struct TypeSwitchStmt {
+    pub pos: usize,
+    pub init: Option<Box<Statement>>,
+    pub tag: Option<Box<Statement>>,
+    pub body_pos: (usize, usize),
+    pub body: Vec<CaseClause>,
+}
+
 pub struct IncDecStmt {
     pub pos: usize,
     pub op: Operator,
@@ -424,6 +447,8 @@ pub enum Statement {
     Assign(AssignStmt),
     Return(ReturnStmt),
     Branch(BranchStmt),
+    Switch(SwitchStmt),
+    TypeSwirch(TypeSwitchStmt),
     Declaration(DeclStmt),
 }
 

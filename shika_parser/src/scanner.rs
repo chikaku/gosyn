@@ -131,11 +131,25 @@ impl Scanner {
             true => None,
             false => {
                 let tok = self.scan_token()?;
+                self.add_token_cross_line(&tok);
                 self.pos += tok.len();
                 self.prev = Some(tok.clone());
                 Some((current, tok))
             }
         })
+    }
+
+    fn add_token_cross_line(&mut self, tok: &Token) {
+        match tok {
+            Token::Comment(text) | Token::Literal(.., text) => {
+                for (index, ch) in text.chars().enumerate() {
+                    if ch == '\n' {
+                        self.add_line(self.pos + index + 1)
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     /// return next Token
@@ -146,7 +160,7 @@ impl Scanner {
 
         if let Some(tok) = match self.next_nchar(2).as_str() {
             "//" => Some(Token::Comment(self.scan_line_comment())),
-            "/*" => Some(Token::Comment(self.scan_general_comment()?)),
+            "/*" => Some(Token::Comment(self.scan_general_comment()?)), // TODO: add line info
             two => Operator::from_str(two).ok().map(|op| op.into()),
         } {
             return Ok(tok);
@@ -187,20 +201,19 @@ impl Scanner {
 
     /// Scan general comment from `/*` to `*/`
     fn scan_general_comment(&mut self) -> Result<String> {
-        assert_eq!("/*", &self.source[self.pos..self.pos + 2]);
-        match self.source[self.pos..].find("*/") {
-            None => Err(self.error("comment no termination '*/'")),
-            Some(pos) => {
-                let end = self.pos + pos + 2;
-                let comments = self.source.get(self.pos..end).unwrap().to_string();
-                for (index, ch) in comments.chars().enumerate() {
-                    if ch == '\n' {
-                        self.add_line(self.pos + index + 1)
-                    }
-                }
+        let chars = self.source.chars().skip(self.pos);
+        assert_eq!("/*", chars.take(2).collect::<String>());
+        let skip1 = self.source.chars().skip(self.pos + 1);
 
-                Ok(comments)
-            }
+        let chars = self.source.chars().skip(self.pos);
+        match chars.zip(skip1).position(|x| x == ('*', '/')) {
+            None => Err(self.error("comment no termination '*/'")),
+            Some(pos) => Ok(self
+                .source
+                .chars()
+                .skip(self.pos)
+                .take(pos + 2)
+                .collect::<String>()),
         }
     }
 
@@ -271,13 +284,13 @@ impl Scanner {
 
     fn scan_lit_rune(&mut self) -> Result<String> {
         let start_at = self.pos;
-        assert_eq!(self.source.get(start_at..start_at + 1), Some("'"));
+        assert_eq!(self.source.chars().skip(start_at).next(), Some('\''));
         let rune = self.scan_rune(start_at + 1)?;
-        let next = start_at + 1 + rune.len();
-        match self.source.get(next..next + 1) {
-            Some("'") => Ok(format!("'{}'", rune)),
-            Some(_) => Err(self.error_at(next, "rune literal expect termination")),
-            None => Err(self.error_at(next, "rune literal not termination")),
+        let pos = start_at + 1 + rune.chars().count();
+        match self.source.chars().skip(pos).next() {
+            Some('\'') => Ok(format!("'{}'", rune)),
+            Some(_) => Err(self.error_at(pos, "rune literal expect termination")),
+            None => Err(self.error_at(pos, "rune literal not termination")),
         }
     }
 
@@ -484,6 +497,16 @@ mod test {
     use super::Scanner;
 
     #[test]
+    fn full_scan() {
+        let mut scan = Scanner::new("'一', '二', '三'");
+        assert!(scan.next_token().is_ok());
+        assert!(scan.next_token().is_ok());
+        assert!(scan.next_token().is_ok());
+        assert!(scan.next_token().is_ok());
+        assert!(scan.next_token().is_ok());
+    }
+
+    #[test]
     fn scan_lit_number() {
         let numeric = |s| Scanner::new(s).scan_lit_number();
         assert!(numeric("1").is_ok());
@@ -588,27 +611,26 @@ mod test {
 
     #[test]
     fn scan_comment() {
-        let mut scanner = Scanner::new("// 123\r\n//123\n/*123*/");
-        assert_eq!(&scanner.scan_line_comment(), "// 123\r");
-        scanner.pos += 8;
+        let mut scanner = Scanner::new("// 注释\r\n//123\n/*注释*/");
+        assert_eq!(&scanner.scan_line_comment(), "// 注释\r");
+        scanner.pos += 7;
         assert_eq!(&scanner.scan_line_comment(), "//123");
         scanner.pos += 6;
-        assert_eq!(&scanner.scan_line_comment(), "/*123*/");
+        assert_eq!(&scanner.scan_line_comment(), "/*注释*/");
     }
 
     #[test]
     fn scan_line_info() {
-        let code = "package main\n/*\n\n*/\n\n// 123\n\n";
+        let code = "package main 代码 \n/*😃\n注释*/\n\n//🎃\n\n";
         let mut scanner = Scanner::new(code);
         while let Ok(Some(_)) = scanner.next_token() {}
         let mut lines = scanner.lines.iter();
-        assert_eq!(lines.next(), Some(&13));
-        assert_eq!(lines.next(), Some(&16));
         assert_eq!(lines.next(), Some(&17));
-        assert_eq!(lines.next(), Some(&20));
         assert_eq!(lines.next(), Some(&21));
-        assert_eq!(lines.next(), Some(&28));
-        assert_eq!(lines.next(), Some(&29));
+        assert_eq!(lines.next(), Some(&26));
+        assert_eq!(lines.next(), Some(&27));
+        assert_eq!(lines.next(), Some(&31));
+        assert_eq!(lines.next(), Some(&32));
         assert_eq!(lines.next(), None);
     }
 
