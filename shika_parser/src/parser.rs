@@ -76,10 +76,13 @@ impl Parser {
     }
 
     fn expect<K: IntoKind>(&mut self, expect: K) -> Result<usize> {
+        let expect2 = expect.into();
         let pos = self.current_pos();
         self.current_is(expect)
             .then(|| self.next().map(|_| pos))
-            .unwrap_or(Err(self.unexpected(&[expect], self.current.to_owned())))
+            // can't use copy of 'expect'
+            // CLion bug: Use of moved value 'expect'
+            .unwrap_or(Err(self.unexpected(&[expect2], self.current.to_owned())))
     }
 
     /// skip while current equal to expect
@@ -1079,6 +1082,7 @@ impl Parser {
             Token::Keyword(Keyword::If) => Ok(self.parse_if_stmt()?.into()),
             Token::Keyword(Keyword::Switch) => Ok(self.parse_switch_stmt()?.into()),
             Token::Keyword(Keyword::Select) => Ok(self.parse_select_stmt()?.into()),
+            Token::Keyword(Keyword::For) => self.parse_for_stmt(),
             Token::Keyword(
                 key @ (Keyword::Break | Keyword::FallThrough | Keyword::Continue | Keyword::Goto),
             ) => Ok(self.parse_branch_stmt(key)?.into()),
@@ -1088,7 +1092,7 @@ impl Parser {
 
     fn parse_range_expr(&mut self) -> Result<ast::RangeExpr> {
         let pos = self.expect(Keyword::Range)?;
-        let right = Box::new(self.parse_expr()?);
+        let right = Box::new(self.parse_stmt_expr()?);
         Ok(ast::RangeExpr { pos, right })
     }
 
@@ -1118,7 +1122,7 @@ impl Parser {
         {
             let op = *op;
             self.next()?;
-            let right = match self.skipped(Keyword::Range)?
+            let right = match self.current_is(Keyword::Range)
                 && (op == Operator::Assign || op == Operator::Define)
             {
                 // left := range right
@@ -1404,7 +1408,7 @@ impl Parser {
                 self.next()?;
                 let value = self.parse_expr()?;
                 let chan = self.check_single_expr(list)?;
-                ast::SendStmt { pos: pos, chan, value }.into()
+                ast::SendStmt { pos, chan, value }.into()
             }
             Some((pos, Token::Operator(op @ (Operator::Define | Operator::Assign)))) => {
                 if list.len() > 2 {
@@ -1436,10 +1440,14 @@ impl Parser {
             let pos = self.current_pos();
             let (comm, tok) = match self.current.as_ref() {
                 Some((_, token::CASE)) => {
+                    self.expect(Keyword::Case)?;
                     let stmt = self.parse_comm_stmt()?;
                     (Some(Box::new(stmt)), Keyword::Case)
                 }
-                _ => (None, Keyword::Default),
+                _ => {
+                    self.expect(Keyword::Default)?;
+                    (None, Keyword::Default)
+                }
             };
 
             let pos = (pos, self.expect(Operator::Colon)?);
@@ -1448,7 +1456,84 @@ impl Parser {
         }
 
         let pos = (pos, self.expect(Operator::BraceRight)?);
-        Ok(ast::CommBlock { pos, body: body })
+        Ok(ast::CommBlock { pos, body })
+    }
+
+    fn parse_for_stmt(&mut self) -> Result<ast::Statement> {
+        let pos = self.expect(Keyword::For)?;
+        if self.current_is(Keyword::Range) {
+            // for range
+            return Ok(ast::RangeStmt {
+                op: None,
+                key: None,
+                value: None,
+                pos: (pos, self.expect(Keyword::Range)?),
+                expr: self.parse_stmt_expr()?,
+                body: self.parse_block_stmt()?,
+            }
+            .into());
+        }
+
+        if self.current_is(Operator::BraceLeft) {
+            // for {
+            let body = self.parse_block_stmt()?;
+            return Ok(ast::ForStmt {
+                pos,
+                body,
+                init: None,
+                cond: None,
+                post: None,
+            }
+            .into());
+        }
+
+        let mut cond = None;
+        if self.current_not(Operator::SemiColon) {
+            cond = match self.parse_simple_stmt()? {
+                ast::Statement::Assign(mut assign) if assign.is_range() => {
+                    if assign.left.len() > 2 {
+                        // TODO: location
+                        return Err(self.else_error_at(0, "expect at most 2 expression"));
+                    }
+
+                    let mut left = assign.left.into_iter();
+                    let key = left.next();
+                    let value = left.next();
+                    let op = Some((assign.pos, assign.op));
+
+                    let (pos1, expr) = match assign.right.pop() {
+                        Some(ast::Expression::Range(ast::RangeExpr { pos, right })) => (pos, right),
+                        _ => unreachable!(),
+                    };
+
+                    let expr = *expr;
+                    let pos = (pos, pos1);
+                    let body = self.parse_block_stmt()?;
+                    return Ok(ast::RangeStmt { pos, key, value, op, expr, body }.into());
+                }
+                stmt @ _ => Some(Box::new(stmt)),
+            };
+        };
+
+        let mut init = None;
+        let mut post = None;
+        if self.current_is(Operator::SemiColon) {
+            self.next()?;
+            init = cond;
+            cond = None;
+
+            if self.current_not(Operator::SemiColon) {
+                cond = Some(Box::new(self.parse_simple_stmt()?));
+            }
+
+            self.expect(Operator::SemiColon)?;
+            if self.current_not(Operator::BraceLeft) {
+                post = Some(Box::new(self.parse_simple_stmt()?));
+            }
+        }
+
+        let body = self.parse_block_stmt()?;
+        Ok(ast::ForStmt { pos, init, cond, post, body }.into())
     }
 }
 
@@ -1457,6 +1542,52 @@ mod test {
     use crate::ast::{ChanMode, ChannelType, Type};
     use crate::parser::Parser;
     use crate::Result;
+
+    #[test]
+    fn parse_for_stmt() -> Result<()> {
+        let fors = |s| Parser::from_str(s).parse_for_stmt();
+
+        fors("for range ch {};")?;
+        fors("for x := range ch {};")?;
+        fors("for _, v := range x {};")?;
+
+        fors("for {};")?;
+        fors("for loop {};")?;
+        fors("for i := 0; i < 1; {};")?;
+        fors("for i := 0; i < 1; i++ {};")?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_select_stmt() -> Result<()> {
+        let select = |s| Parser::from_str(s).parse_select_stmt();
+
+        select(
+            r#"
+select {
+case i1 = <-c1:
+	print("received ", i1, " from c1\n")
+case c2 <- i2:
+	print("sent ", i2, " to c2\n")
+case i3, ok := (<-c3): // same as: i3, ok := <-c3
+	if ok {
+		print("received ", i3, " from c3\n")
+	} else {
+		print("c3 is closed\n")
+	}
+case a[f()] = <-c4:
+	// same as:
+	// case t := <-c4
+	//	a[f()] = t
+default:
+	print("no communication\n")
+}
+        "#,
+        )?;
+
+        Ok(())
+    }
 
     #[test]
     fn parse_switch_stmt() -> Result<()> {

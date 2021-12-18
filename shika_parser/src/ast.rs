@@ -255,7 +255,7 @@ pub struct Ellipsis {
 }
 
 pub struct RangeExpr {
-    pub pos: usize,
+    pub pos: usize, // pos of 'range'
     pub right: Box<Expression>,
 }
 
@@ -384,6 +384,12 @@ pub struct AssignStmt {
     pub right: Vec<Expression>,
 }
 
+impl AssignStmt {
+    pub fn is_range(&self) -> bool {
+        matches!(self.right.first(), Some(Expression::Range(_)))
+    }
+}
+
 pub struct LabeledStmt {
     pub pos: usize,
     pub name: Ident,
@@ -449,14 +455,33 @@ pub struct SelectStmt {
     pub body: CommBlock,
 }
 
+pub struct RangeStmt {
+    pub pos: (usize, usize), // pos of (for, range)
+    pub key: Option<Expression>,
+    pub value: Option<Expression>,
+    pub op: Option<(usize, Operator)>, // define or assign
+    pub expr: Expression,
+    pub body: BlockStmt,
+}
+
+pub struct ForStmt {
+    pub pos: usize,
+    pub init: Option<Box<Statement>>,
+    pub cond: Option<Box<Statement>>,
+    pub post: Option<Box<Statement>>,
+    pub body: BlockStmt,
+}
+
 #[derive(EnumFromWrapped)]
 pub enum Statement {
     Go(GoStmt),
     If(IfStmt),
+    For(ForStmt),
     Send(SendStmt),
     Expr(ExprStmt),
     Defer(DeferStmt),
     Block(BlockStmt),
+    Range(RangeStmt),
     Label(LabeledStmt),
     IncDec(IncDecStmt),
     Assign(AssignStmt),
@@ -464,7 +489,7 @@ pub enum Statement {
     Branch(BranchStmt),
     Switch(SwitchStmt),
     Select(SelectStmt),
-    TypeSwirch(TypeSwitchStmt),
+    TypeSwitch(TypeSwitchStmt),
     Declaration(DeclStmt),
 }
 
