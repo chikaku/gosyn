@@ -5,7 +5,8 @@
 #![feature(custom_inner_attributes)]
 #![feature(destructuring_assignment)]
 
-mod ast;
+pub mod ast;
+mod ast_impl;
 mod error;
 mod parser;
 mod scanner;
@@ -16,7 +17,7 @@ pub use parser::*;
 pub use scanner::*;
 pub use token::*;
 
-type Result<T> = core::result::Result<T, Error>;
+pub type Result<T> = core::result::Result<T, Error>;
 
 pub fn parse_source<S: AsRef<str>>(source: S) -> Result<ast::File> {
     Parser::from_str(source).parse_file()

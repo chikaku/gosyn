@@ -9,6 +9,7 @@ use unic_ucd_category::GeneralCategory;
 pub type Pos = usize;
 pub type PosTok = (Pos, Token);
 
+#[derive(PartialEq, Debug)]
 pub struct Error {
     pub pos: Pos,
     pub reason: String,
@@ -168,11 +169,11 @@ impl Scanner {
 
         // caller make sure here is at least one character
         let next0_char = self.next_char(0).unwrap();
-        let next1_is_digits = matches!(self.next_char(1), Some('0'..'9'));
+        let next1_is_digits = matches!(self.next_char(1), Some('0'..='9'));
         let next0_char_op = Operator::from_str(&next0_char.to_string()).ok();
 
         Ok(match next0_char {
-            '0'..'9' => self.scan_lit_number()?,
+            c if is_decimal_digit(c) => self.scan_lit_number()?,
             '.' if next1_is_digits => self.scan_lit_number()?,
             '\'' => Token::Literal(LitKind::Char, self.scan_lit_rune()?),
             '"' | '`' => Token::Literal(LitKind::String, self.scan_lit_string()?),
@@ -493,14 +494,20 @@ fn is_escaped_char(c: char) -> bool {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::Scanner;
+    use crate::token::Token;
 
     #[test]
-    fn full_scan() {
+    fn scan_text() {
         let mut scan = Scanner::new("'一', '二', '三'");
         assert!(scan.next_token().is_ok());
         assert!(scan.next_token().is_ok());
+        assert!(scan.next_token().is_ok());
+        assert!(scan.next_token().is_ok());
+        assert!(scan.next_token().is_ok());
+
+        let mut scan = Scanner::new("n%9");
         assert!(scan.next_token().is_ok());
         assert!(scan.next_token().is_ok());
         assert!(scan.next_token().is_ok());
@@ -527,46 +534,46 @@ mod test {
         assert!(numeric("0_xBadFace").is_err());
 
         assert!(numeric("0.").is_ok());
-        assert!(numeric("72.40").is_ok());
-        assert!(numeric("072.40").is_ok());
-        assert!(numeric("2.71828").is_ok());
-        assert!(numeric("1.e+0").is_ok());
-        assert!(numeric("6.67428e-11").is_ok());
         assert!(numeric("1E6").is_ok());
         assert!(numeric(".25").is_ok());
-        assert!(numeric(".12345E+5").is_ok());
         assert!(numeric("1_5.").is_ok());
+        assert!(numeric("72.40").is_ok());
+        assert!(numeric("1.e+0").is_ok());
+        assert!(numeric("072.40").is_ok());
+        assert!(numeric("2.71828").is_ok());
+        assert!(numeric(".12345E+5").is_ok());
         assert!(numeric("0.15e+0_2").is_ok());
+        assert!(numeric("6.67428e-11").is_ok());
 
         assert!(numeric("0x1p-2").is_ok());
         assert!(numeric("0x2.p10").is_ok());
-        assert!(numeric("0x1.Fp+0").is_ok());
         assert!(numeric("0X.8p-0").is_ok());
-        assert!(numeric("0X_1FFFP-16").is_ok());
         assert!(numeric("0x15e-2").is_ok());
+        assert!(numeric("0x1.Fp+0").is_ok());
+        assert!(numeric("0X_1FFFP-16").is_ok());
 
-        assert!(numeric("0x.p1").is_err());
         assert!(numeric("1p-2").is_err());
-        assert!(numeric("0x1.5e-2").is_err());
         assert!(numeric("1_.5").is_err());
         assert!(numeric("1._5").is_err());
+        assert!(numeric("0x.p1").is_err());
         assert!(numeric("1.5_e1").is_err());
         assert!(numeric("1.5e_1").is_err());
-        assert!(numeric("1.5e+_1").is_err());
         assert!(numeric("1.5e1_").is_err());
+        assert!(numeric("1.5e+_1").is_err());
+        assert!(numeric("0x1.5e-2").is_err());
 
         assert!(numeric("0i").is_ok());
+        assert!(numeric("0.i").is_ok());
+        assert!(numeric("1E6i").is_ok());
+        assert!(numeric(".25i").is_ok());
         assert!(numeric("0123i").is_ok());
         assert!(numeric("0o123i").is_ok());
         assert!(numeric("0xabci").is_ok());
-        assert!(numeric("0.i").is_ok());
-        assert!(numeric("2.71828i").is_ok());
         assert!(numeric("1.e+0i").is_ok());
-        assert!(numeric("6.67428e-11i").is_ok());
-        assert!(numeric("1E6i").is_ok());
-        assert!(numeric(".25i").is_ok());
-        assert!(numeric(".12345E+5i").is_ok());
+        assert!(numeric("2.71828i").is_ok());
         assert!(numeric("0x1p-2i ").is_ok());
+        assert!(numeric(".12345E+5i").is_ok());
+        assert!(numeric("6.67428e-11i").is_ok());
     }
 
     #[test]
@@ -597,13 +604,13 @@ mod test {
         let lit_str = |s| Scanner::new(s).scan_lit_string();
 
         assert!(lit_str("`abc`").is_ok());
-        assert!(lit_str("`\\n\n\\n`").is_ok());
         assert!(lit_str(r#""\n""#).is_ok());
         assert!(lit_str(r#""\"""#).is_ok());
-        assert!(lit_str(r#""Hello, world!\n""#).is_ok());
         assert!(lit_str(r#""日本語""#).is_ok());
-        assert!(lit_str(r#""\u65e5本\U00008a9e""#).is_ok());
+        assert!(lit_str("`\\n\n\\n`").is_ok());
         assert!(lit_str(r#""\xff\u00FF""#).is_ok());
+        assert!(lit_str(r#""Hello, world!\n""#).is_ok());
+        assert!(lit_str(r#""\u65e5本\U00008a9e""#).is_ok());
 
         assert!(lit_str(r#""\uD800""#).is_err());
         assert!(lit_str(r#""\U00110000""#).is_err());
@@ -611,12 +618,14 @@ mod test {
 
     #[test]
     fn scan_comment() {
-        let mut scanner = Scanner::new("// 注释\r\n//123\n/*注释*/");
-        assert_eq!(&scanner.scan_line_comment(), "// 注释\r");
-        scanner.pos += 7;
-        assert_eq!(&scanner.scan_line_comment(), "//123");
-        scanner.pos += 6;
-        assert_eq!(&scanner.scan_line_comment(), "/*注释*/");
+        let mut comments = Scanner::new("// 注释\r\n//123\n/*注释*/");
+
+        let next = comments.next_token().map(|x| x.map(|(_, tok)| tok));
+        assert_eq!(next, Ok(Some(Token::Comment(String::from("// 注释\r")))));
+        let next = comments.next_token().map(|x| x.map(|(_, tok)| tok));
+        assert_eq!(next, Ok(Some(Token::Comment(String::from("//123")))));
+        let next = comments.next_token().map(|x| x.map(|(_, tok)| tok));
+        assert_eq!(next, Ok(Some(Token::Comment(String::from("/*注释*/")))));
     }
 
     #[test]

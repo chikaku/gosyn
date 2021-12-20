@@ -5,7 +5,6 @@ use crate::Pos;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use shika_proc_macro::EnumFrom;
 use shika_proc_macro::EnumFromWrapped;
 use shika_proc_macro::EnumIntoWrapped;
 
@@ -27,12 +26,6 @@ pub struct TypeName {
     pub name: Ident,
 }
 
-impl From<Ident> for TypeName {
-    fn from(id: Ident) -> Self {
-        Self { pkg: None, name: id }
-    }
-}
-
 pub struct PointerType {
     pub pos: usize,
     pub typ: Box<Type>,
@@ -45,7 +38,7 @@ pub struct ArrayType {
 }
 
 pub struct SliceType {
-    pub pos: usize,
+    pub pos: (usize, usize),
     pub typ: Box<Type>,
 }
 
@@ -110,42 +103,6 @@ pub enum Type {
     Interface(InterfaceType), // interface { ... }
 }
 
-impl From<Ident> for Type {
-    fn from(id: Ident) -> Self {
-        Self::Ident(id.into())
-    }
-}
-
-impl From<Ident> for Field {
-    fn from(id: Ident) -> Self {
-        Self {
-            name: vec![],
-            typ: Expression::Type(id.into()),
-            tag: None,
-        }
-    }
-}
-
-impl From<TypeName> for Field {
-    fn from(id: TypeName) -> Self {
-        Self {
-            name: vec![],
-            typ: id.into(),
-            tag: None,
-        }
-    }
-}
-
-impl From<Type> for Field {
-    fn from(typ: Type) -> Self {
-        Self {
-            name: vec![],
-            typ: Expression::Type(typ),
-            tag: None,
-        }
-    }
-}
-
 // ================ Expression Definition ================
 
 pub struct BasicLit {
@@ -160,23 +117,14 @@ pub struct StringLit {
     pub value: String,
 }
 
-impl From<BasicLit> for StringLit {
-    fn from(lit: BasicLit) -> StringLit {
-        assert_eq!(lit.kind, LitKind::String);
-        StringLit { pos: lit.pos, value: lit.value }
-    }
-}
-
 pub struct FuncLit {
     pub typ: FuncType,
     pub body: Option<BlockStmt>,
 }
 
-#[derive(EnumFrom)]
+#[derive(EnumFromWrapped)]
 pub enum Element {
-    #[enum_from(inner)]
     Expr(Expression),
-    #[enum_from(inner)]
     LitValue(LiteralValue),
 }
 
@@ -233,7 +181,7 @@ pub struct UnaryExpression {
 }
 
 pub struct BinaryExpression {
-    pub pos: usize,
+    pub pos: usize, // pos of operator
     pub op: Operator,
     pub left: Box<Expression>,
     pub right: Box<Expression>,
@@ -279,16 +227,6 @@ pub enum Expression {
     CompositeLit(CompositeLit),
 }
 
-impl From<Ellipsis> for Field {
-    fn from(ell: Ellipsis) -> Self {
-        Self {
-            name: vec![],
-            typ: Expression::Ellipsis(ell),
-            tag: None,
-        }
-    }
-}
-
 // ================ Declaration Definition ================
 
 pub struct Decl<T> {
@@ -321,8 +259,10 @@ pub struct TypeSpec {
 }
 
 pub struct FuncDecl {
+    pub recv: Option<FieldList>,
     pub name: Ident,
     pub typ: FuncType,
+    pub body: Option<BlockStmt>,
 }
 
 #[derive(EnumFromWrapped)]
@@ -382,12 +322,6 @@ pub struct AssignStmt {
     pub op: Operator,
     pub left: Vec<Expression>,
     pub right: Vec<Expression>,
-}
-
-impl AssignStmt {
-    pub fn is_range(&self) -> bool {
-        matches!(self.right.first(), Some(Expression::Range(_)))
-    }
 }
 
 pub struct LabeledStmt {
@@ -472,6 +406,10 @@ pub struct ForStmt {
     pub body: BlockStmt,
 }
 
+pub struct EmptyStmt {
+    pub pos: usize,
+}
+
 #[derive(EnumFromWrapped)]
 pub enum Statement {
     Go(GoStmt),
@@ -482,6 +420,7 @@ pub enum Statement {
     Defer(DeferStmt),
     Block(BlockStmt),
     Range(RangeStmt),
+    Empty(EmptyStmt),
     Label(LabeledStmt),
     IncDec(IncDecStmt),
     Assign(AssignStmt),
