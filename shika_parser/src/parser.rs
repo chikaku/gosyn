@@ -1,5 +1,5 @@
+use crate::ast;
 use crate::ast::ChanMode;
-use crate::ast::{self};
 use crate::ast::{BasicLit, ChannelType};
 use crate::scanner::{PosTok, Scanner};
 use crate::token;
@@ -295,7 +295,7 @@ impl Parser {
         Ok(ast::FuncDecl { name, typ, recv, body })
     }
 
-    fn parse_decl<T, F: FnMut(&mut Parser) -> Result<T>>(
+    fn parse_decl<T, F: FnMut(&mut Parser, usize) -> Result<T>>(
         &mut self,
         mut parse_spec: F,
     ) -> Result<ast::Decl<T>> {
@@ -304,10 +304,13 @@ impl Parser {
         self.next()?;
 
         if self.current_is(Operator::ParenLeft) {
+            let mut index = 0;
             let left = self.expect(Operator::ParenLeft)?;
             while !self.current_is(Operator::ParenRight) {
-                specs.push(parse_spec(self)?);
+                // index for check first iota in const spec
+                specs.push(parse_spec(self, index)?);
                 self.skipped(Operator::SemiColon)?;
+                index += 1;
             }
             let right = self.expect(Operator::ParenRight)?;
             let pos1 = Some((left, right));
@@ -316,12 +319,12 @@ impl Parser {
         }
 
         let pos1 = None;
-        specs.push(parse_spec(self)?);
+        specs.push(parse_spec(self, 0)?);
         self.skipped(Operator::SemiColon)?;
         Ok(ast::Decl { pos0, specs, pos1 })
     }
 
-    fn parse_type_sepc(&mut self) -> Result<ast::TypeSpec> {
+    fn parse_type_sepc(&mut self, _: usize) -> Result<ast::TypeSpec> {
         Ok(ast::TypeSpec {
             docs: vec![],
             name: self.parse_ident()?,
@@ -330,7 +333,7 @@ impl Parser {
         })
     }
 
-    fn parse_var_spec(&mut self) -> Result<ast::VarSpec> {
+    fn parse_var_spec(&mut self, _: usize) -> Result<ast::VarSpec> {
         let mut spec = ast::VarSpec::default();
         spec.name = self.parse_ident_list()?;
         match self.skipped(Operator::Assign)? {
@@ -343,10 +346,15 @@ impl Parser {
             }
         }
 
-        self.check_expr_init(&spec.name, &spec.values).map(|_| spec)
+        if spec.typ.is_none() && spec.values.is_empty() {
+            let pos = self.current_pos();
+            Err(self.else_error_at(pos, "mission variable type or initialization"))
+        } else {
+            Ok(spec)
+        }
     }
 
-    fn parse_const_sepc(&mut self) -> Result<ast::ConstSpec> {
+    fn parse_const_sepc(&mut self, index: usize) -> Result<ast::ConstSpec> {
         let mut spec = ast::ConstSpec::default();
         spec.name = self.parse_ident_list()?;
         match self.skipped(Operator::Assign)? {
@@ -360,17 +368,12 @@ impl Parser {
             }
         }
 
-        self.check_expr_init(&spec.name, &spec.values).map(|_| spec)
-    }
-
-    #[rustfmt::skip]
-    fn check_expr_init<T1, T2>(&self, left: &Vec<T1>, right: &Vec<T2>) -> Result<()> {
-        let pos = self.current_pos();
-        (right.len() > 0).then(|| match right.len().cmp(&left.len()) {
-            std::cmp::Ordering::Equal => Ok(()),
-            std::cmp::Ordering::Less => Err(self.else_error_at(pos, "mission init expression")),
-            std::cmp::Ordering::Greater => Err(self.else_error_at(pos, "extra init expression")),
-        }).unwrap_or(Ok(()))
+        if spec.values.is_empty() && (spec.typ.is_some() || index == 0) {
+            let pos = self.current_pos();
+            Err(self.else_error_at(pos, "mission constant value"))
+        } else {
+            Ok(spec)
+        }
     }
 
     fn parse_type_list(&mut self) -> Result<Vec<ast::Expression>> {
@@ -543,12 +546,14 @@ impl Parser {
             if id.pkg.is_some() || !self.current_is(Operator::ParenLeft) {
                 // nested interface name
                 methods.list.push(id.into());
+                self.skipped(Operator::SemiColon)?;
                 continue;
             }
 
             let mut typ = ast::FuncType::default();
             typ.params = self.parse_params()?;
             typ.result = self.parse_result()?;
+            self.skipped(Operator::SemiColon)?;
             let typ = ast::Type::Function(typ);
             methods.list.push(ast::Field {
                 name: vec![id.name],
@@ -785,10 +790,12 @@ impl Parser {
             }
             token::LPAREN => {
                 self.next()?;
-                let args = self
-                    .current_not(Operator::ParenRight)
-                    .then(|| self.parse_expr_list())
-                    .map_or(Ok(vec![]), |r| r)?;
+                let mut args = vec![];
+                while self.current_not(Operator::ParenRight) && self.current_not(Operator::Ellipsis)
+                {
+                    args.push(self.parse_expr()?);
+                    self.skipped(Operator::Comma)?;
+                }
 
                 let current_pos = self.current_pos();
                 let ellipsis = self.skipped(Operator::Ellipsis)?.then_some(current_pos);
@@ -929,10 +936,13 @@ impl Parser {
         let result = match self.current {
             Some((_, token::LPAREN)) => self.parse_params()?,
             None | Some((_, token::LBRACE | token::SEMICOLON)) => ast::FieldList::default(),
-            _ => {
-                let field = self.parse_type()?.into();
-                ast::FieldList { pos: None, list: vec![field] }
-            }
+            _ => match self.parse_type() {
+                Ok(field) => ast::FieldList {
+                    pos: None,
+                    list: vec![field.into()],
+                },
+                Err(_) => ast::FieldList::default(),
+            },
         };
 
         self.check_field_list(result, false)
@@ -951,6 +961,7 @@ impl Parser {
                     match self.get_current()? {
                         // T, pkg.?
                         (_, Token::Operator(Operator::Period)) => {
+                            self.next()?;
                             let name = self.parse_ident()?;
                             let pkg = ident_list.pop();
 
@@ -1153,7 +1164,7 @@ impl Parser {
                     },
                     token::ARROW => {
                         self.next()?;
-                        let value = self.parse_stmt_expr()?;
+                        let value = self.parse_expr()?;
                         ast::SendStmt { pos, chan: expr, value }.into()
                     }
                     Token::Operator(op @ (Operator::Inc | Operator::Dec)) => {
@@ -1251,7 +1262,7 @@ impl Parser {
             .then(|| self.parse_ident())
             .map_or(Ok(None), |r| r.map(Some))?;
 
-        self.expect(Operator::SemiColon)?;
+        self.skipped(Operator::SemiColon)?;
         Ok(ast::BranchStmt { pos, key, ident })
     }
 
@@ -1624,6 +1635,7 @@ mod test {
         vars("var a = 1")?;
         vars("var a, b int")?;
         vars("var a, b = 1, 2")?;
+        vars("var a, b = result()")?;
         vars("var a, b int = 1, 2")?;
         vars("var (a = 1; b int = 2)")?;
         vars("var (a int; b, c int = 2, 3; e, f = 5, 6)")?;
@@ -1639,7 +1651,6 @@ mod test {
         consts("const (a = 1; b, c = 2, 3)")?;
 
         assert!(consts("const a int64;").is_err());
-        assert!(consts("const (a = iota b, c = iota)").is_err());
 
         Ok(())
     }
@@ -1649,6 +1660,7 @@ mod test {
         let func = |s| Parser::from_str(s).parse_func_decl();
 
         func("func (m *M) Print() { fmt.Print(m.message)}")?;
+        func("func a(w t1, r *t2, e chan<- t3) {x <- t4{c: c, t: t};}")?;
 
         Ok(())
     }
@@ -1660,8 +1672,10 @@ mod test {
         params("()")?;
         params("(bool)")?;
         params("(a bool)")?;
+        params("(func())")?;
         params("(a ...bool)")?;
         params("(a, b, c bool)")?;
+        params("(a.b, c.d) e.f")?;
         params("(int, int, bool)")?;
         params("(a, b int, c bool)")?;
         params("(int, bool, ...int)")?;
@@ -1706,6 +1720,7 @@ mod test {
         expr("call(1, a...)")?;
         expr("call(a, b...)")?;
         expr("call(a, x.M()%99)")?;
+        expr("call(a, b,)")?;
 
         expr("x.(int)")?;
         expr("x.(type)")?;
@@ -1765,6 +1780,8 @@ mod test {
         interface("interface{Close() error}")?;
         interface("interface{Show(int) string}")?;
         interface("interface{Show(...int) string}")?;
+        interface("interface {os.FileInfo; String() string}")?;
+        interface("interface {Publish(string, []byte) error}")?;
 
         assert!(interface("interface {a, b;}").is_err());
 
@@ -1824,9 +1841,11 @@ mod test {
     fn parse_stmt() -> Result<()> {
         let stmt = |s| Parser::from_str(s).parse_stmt();
 
+        stmt("a <- b{c: c, d: d}")?;
         stmt("if err != nil { return }")?;
         stmt("{ _ = &AnyList{1, '1'} }")?;
-        stmt("fmt.Sprintf(`123`, rand.Int()%999999);")?;
+        stmt("defer close() //\na = 1;")?;
+        stmt("fmt.Sprintf(`123`, rand.Int()%99);")?;
 
         Ok(())
     }

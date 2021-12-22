@@ -20,7 +20,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 #[derive(Default)]
 pub struct Scanner {
     pub pos: usize,
-    length: usize,
+    index: usize,
     source: String,
     lines: Vec<usize>,
 
@@ -32,7 +32,6 @@ impl Scanner {
     pub fn new<S: AsRef<str>>(source: S) -> Self {
         let mut scan = Self::default();
         scan.source = source.as_ref().into();
-        scan.length = scan.source.chars().count();
         scan
     }
 
@@ -69,11 +68,13 @@ impl Scanner {
     }
 
     fn next_char(&mut self, skp: usize) -> Option<char> {
-        self.source.chars().skip(self.pos + skp).next().to_owned()
+        let source = &self.source[self.index..];
+        source.chars().skip(skp).next().to_owned()
     }
 
     fn next_nchar(&mut self, n: usize) -> String {
-        self.source.chars().skip(self.pos).take(n).collect()
+        let source = &self.source[self.index..];
+        source.chars().take(n).collect()
     }
 
     fn try_insert_semicolon(&mut self, pos: usize) {
@@ -99,7 +100,7 @@ impl Scanner {
 
     pub fn skip_whitespace(&mut self) -> usize {
         let mut skipped = 0;
-        while let Some(ch) = self.source.chars().nth(self.pos) {
+        while let Some(ch) = self.next_char(0) {
             if ch.is_whitespace() {
                 if ch == '\n' {
                     self.add_line(self.pos + 1);
@@ -109,6 +110,7 @@ impl Scanner {
 
                 skipped += 1;
                 self.pos += 1;
+                self.index += 1;
                 continue;
             }
 
@@ -127,13 +129,14 @@ impl Scanner {
             return Ok(Some(pos_tok));
         }
 
-        let current = self.pos;
-        Ok(match current >= self.length {
+        Ok(match self.index >= self.source.len() {
             true => None,
             false => {
+                let current = self.pos;
                 let tok = self.scan_token()?;
                 self.add_token_cross_line(&tok);
-                self.pos += tok.len();
+                self.index += tok.len();
+                self.pos += tok.char_count();
                 self.prev = Some(tok.clone());
                 Some((current, tok))
             }
@@ -193,28 +196,30 @@ impl Scanner {
 
     /// Scan line comment from `//` to `\n`
     fn scan_line_comment(&mut self) -> String {
-        self.source
+        self.source[self.index..]
             .chars()
-            .skip(self.pos)
             .take_while(|&ch| ch != '\n')
             .collect()
     }
 
     /// Scan general comment from `/*` to `*/`
     fn scan_general_comment(&mut self) -> Result<String> {
-        let chars = self.source.chars().skip(self.pos);
-        assert_eq!("/*", chars.take(2).collect::<String>());
-        let skip1 = self.source.chars().skip(self.pos + 1);
+        let source = &self.source[self.index..];
+        assert_eq!(&source[0..2], "/*");
 
-        let chars = self.source.chars().skip(self.pos);
-        match chars.zip(skip1).position(|x| x == ('*', '/')) {
-            None => Err(self.error("comment no termination '*/'")),
-            Some(pos) => Ok(self
-                .source
-                .chars()
-                .skip(self.pos)
-                .take(pos + 2)
-                .collect::<String>()),
+        let mut result = String::from("/*");
+        let mut chars = source.chars().skip(2).peekable();
+        while let Some(ch) = chars.next() {
+            result.push(ch);
+            if ch == '*' && chars.peek() == Some(&'/') {
+                result.push('/');
+                break;
+            }
+        }
+
+        match result.ends_with("*/") {
+            true => Ok(result),
+            false => Err(self.error("comment no termination '*/'")),
         }
     }
 
@@ -222,15 +227,15 @@ impl Scanner {
     /// caller must ensure that the first character is a unicode letter
     /// caller should check if identify is a keyword
     fn scan_identifier(&mut self) -> String {
-        self.source
+        self.source[self.index..]
             .chars()
-            .skip(self.pos)
             .take_while(|&ch| is_letter(ch) || is_unicode_digit(ch))
             .collect()
     }
 
-    fn scan_rune(&mut self, pos: usize) -> Result<String> {
-        let mut chars = self.source.chars().skip(pos);
+    fn scan_rune(&mut self, index: usize) -> Result<String> {
+        let source = &self.source[index..];
+        let mut chars = source.chars();
         let (next1, next2) = (chars.next(), chars.next());
 
         // must match a valid character
@@ -260,8 +265,8 @@ impl Scanner {
                 None => return Err(self.error("literal not terminated")),
             },
             Some(ch) if is_unicode_char(ch) => return Ok(String::from(ch)),
-            None => return Err(self.error_at(pos, "literal not terminated")),
-            Some(_) => return Err(self.error_at(pos, "unexpected character")),
+            None => return Err(self.error_at(self.pos, "literal not terminated")),
+            Some(_) => return Err(self.error_at(self.pos, "unexpected character")),
         };
 
         let es_sequence = [vec![next1.unwrap(), next2.unwrap()], es_sequence].concat();
@@ -284,50 +289,56 @@ impl Scanner {
     }
 
     fn scan_lit_rune(&mut self) -> Result<String> {
-        let start_at = self.pos;
-        assert_eq!(self.source.chars().skip(start_at).next(), Some('\''));
-        let rune = self.scan_rune(start_at + 1)?;
-        let pos = start_at + 1 + rune.chars().count();
-        match self.source.chars().skip(pos).next() {
-            Some('\'') => Ok(format!("'{}'", rune)),
-            Some(_) => Err(self.error_at(pos, "rune literal expect termination")),
-            None => Err(self.error_at(pos, "rune literal not termination")),
+        let source = &self.source[self.index..];
+        assert_eq!(&source[0..1], "'");
+        let rune = self.scan_rune(self.index + 1)?;
+        let index = self.index + 1 + rune.len();
+        match self.source.get(index..index + 1) {
+            Some("'") => Ok(format!("'{}'", rune)),
+            Some(_) => Err(self.error_at(self.pos, "rune literal expect termination")),
+            None => Err(self.error_at(self.pos, "rune literal not termination")),
         }
     }
 
     fn scan_lit_string(&mut self) -> Result<String> {
-        let quote = self.source.chars().skip(self.pos).next().unwrap();
-        let lit = match quote {
-            '`' => self
-                .source
-                .chars()
-                .skip(self.pos + 1)
-                .take_while(|&ch| ch != '`' && (is_unicode_char(ch) || is_newline(ch)))
-                .collect::<String>(),
-            '"' => {
-                let mut index = self.pos + 1;
-                let mut lit = String::new();
-                while self.source.chars().skip(index).next() != Some('"') {
-                    let rune = self.scan_rune(index)?;
-                    index += rune.chars().count();
-                    lit += rune.as_str();
-                }
-                lit
-            }
-            _ => unreachable!(),
-        };
+        let source = &self.source[self.index..];
+        let mut chars = source.chars();
 
-        let offset = self.pos + 1 + lit.chars().count();
-        match self.source.chars().skip(offset).next() {
-            Some(next) if next == quote => Ok(format!("{}{}{}", quote, lit, quote)),
+        let mut result = String::new();
+        let quote = chars.next().unwrap();
+        result.push(quote);
+
+        if quote == '`' {
+            while let Some(ch) = chars.next() {
+                result.push(ch);
+                if ch == quote {
+                    break;
+                }
+            }
+        } else {
+            let quote = quote.to_string();
+            let mut index = self.index + 1;
+            while chars.next().is_some() {
+                let rune = self.scan_rune(index)?;
+                index += rune.len();
+                result.push_str(&rune);
+                chars = self.source[index..].chars();
+                if rune == quote {
+                    break;
+                }
+            }
+        }
+
+        let offset = self.pos + result.chars().count();
+        match result.ends_with(quote) {
+            true => Ok(result),
             _ => Err(self.error_at(offset, "string literal not terminated")),
         }
     }
 
     fn scan_digits(&mut self, n: usize, valid: fn(char) -> bool) -> String {
-        self.source
+        self.source[self.index + n..]
             .chars()
-            .skip(self.pos + n)
             .scan(true, |state, item| {
                 (item != '_' || *state).then(|| {
                     *state = item != '_';
@@ -339,7 +350,7 @@ impl Scanner {
     }
 
     fn scan_lit_number(&mut self) -> Result<Token> {
-        let chars = self.source.chars().skip(self.pos);
+        let chars = self.source[self.index..].chars();
         let next2 = chars.take(2).collect::<String>().to_owned();
 
         // integer part
@@ -496,7 +507,15 @@ fn is_escaped_char(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::Scanner;
-    use crate::token::Token;
+    use crate::{token::Token, Operator};
+
+    #[test]
+    fn insert_semicolon() {
+        let mut scan = Scanner::new("return//\nreturn");
+        scan.next_token().unwrap();
+        let next = scan.next_token().unwrap();
+        assert_eq!(next.unwrap().1, Token::Operator(Operator::SemiColon));
+    }
 
     #[test]
     fn scan_text() {

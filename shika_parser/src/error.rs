@@ -27,12 +27,7 @@ impl Debug for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::IO(err) => write!(f, "os error: {}", err),
-            Error::UnexpectedToken {
-                expect,
-                actual,
-                path,
-                location,
-            } => {
+            Error::UnexpectedToken { expect, actual, path, location } => {
                 let (line, offset) = location;
                 let path = path.as_os_str().to_str().unwrap();
                 let file_line = format!("{}:{}:{}", path, line, offset);
@@ -47,11 +42,7 @@ impl Debug for Error {
                     Some(tok) => write!(f, "{} {}, found {:?}", file_line, exp, tok),
                 }
             }
-            Error::Else {
-                path,
-                location,
-                reason,
-            } => {
+            Error::Else { path, location, reason } => {
                 let (line, offset) = location;
                 let path = path.as_os_str().to_str().unwrap();
                 write!(f, "{}:{}:{} {:?}", path, line, offset, reason)

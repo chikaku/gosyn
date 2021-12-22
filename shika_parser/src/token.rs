@@ -230,6 +230,15 @@ impl Token {
         match self {
             Token::Operator(op) => op.to_str().len(),
             Token::Keyword(word) => word.to_str().len(),
+            Token::Comment(text) => text.len(),
+            Token::Literal(_, value) => value.len(),
+        }
+    }
+
+    pub fn char_count(&self) -> usize {
+        match self {
+            Token::Operator(op) => op.to_str().len(),
+            Token::Keyword(word) => word.to_str().len(),
             Token::Comment(text) => text.chars().count(),
             Token::Literal(_, value) => value.chars().count(),
         }
@@ -292,6 +301,7 @@ pub const INC: Token = Token::Operator(Operator::Inc);
 pub const DEC: Token = Token::Operator(Operator::Dec);
 pub const STAR: Token = Token::Operator(Operator::Star);
 pub const COLON: Token = Token::Operator(Operator::Colon);
+pub const COMMA: Token = Token::Operator(Operator::Colon);
 pub const ARROW: Token = Token::Operator(Operator::Arrow);
 pub const PERIOD: Token = Token::Operator(Operator::Period);
 pub const LPAREN: Token = Token::Operator(Operator::ParenLeft);

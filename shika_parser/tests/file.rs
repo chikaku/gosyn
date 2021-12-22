@@ -17,6 +17,16 @@ fn parse_source(source: String) -> Result<Duration> {
 }
 
 #[test]
+fn test_exception_file() -> Result<()> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = root.join("tests/exception.txt");
+    let source = fs::read_to_string(&path)?;
+    parse_source(source)?;
+
+    Ok(())
+}
+
+#[test]
 fn test_third_party_projects() -> Result<()> {
     let root = match env::var("SHIKA_PARSER_TEST") {
         Ok(dir) => PathBuf::from(dir),
