@@ -20,8 +20,10 @@ fn parse_source(source: String) -> Result<Duration> {
 fn test_exception_file() -> Result<()> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let path = root.join("tests/exception.txt");
-    let source = fs::read_to_string(&path)?;
-    parse_source(source)?;
+    if path.is_file() {
+        let source = fs::read_to_string(&path)?;
+        parse_source(source)?;
+    }
 
     Ok(())
 }
@@ -37,6 +39,11 @@ fn test_third_party_projects() -> Result<()> {
         if let Ok(object) = entry {
             let mut walk = Walkdir::new(object.path())?.with_ext("go")?;
             while let Some(path) = walk.next()? {
+                let f = fs::File::open(&path)?;
+                if f.metadata()?.len() > 1024 * 1024 {
+                    continue;
+                }
+
                 let source = fs::read_to_string(&path)?;
                 println!(
                     "{}: {}",

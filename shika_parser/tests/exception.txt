@@ -1,0 +1,9 @@
+package main
+
+func mxx() {
+    switch a := x; c.(type) {
+    case nil, *d:
+    default:
+
+    }
+}

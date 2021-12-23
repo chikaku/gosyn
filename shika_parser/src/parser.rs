@@ -20,6 +20,7 @@ pub struct Parser {
     path: PathBuf,
     scan: Scanner,
 
+    expr_level: i32,
     current: Option<PosTok>,
     comments: Vec<Rc<ast::Comment>>,
     lead_comments: Vec<Rc<ast::Comment>>,
@@ -378,7 +379,7 @@ impl Parser {
 
     fn parse_type_list(&mut self) -> Result<Vec<ast::Expression>> {
         let mut result = vec![self.parse_type()?];
-        while self.current_is(Operator::Comma) {
+        while self.skipped(Operator::Comma)? {
             result.push(self.parse_type()?);
         }
 
@@ -510,7 +511,11 @@ impl Parser {
                                 (vec![], ast::Type::Ident(id_list.pop().unwrap().into()))
                             }
                             // { name ?T }
-                            _ => (id_list, self.parse_type()?),
+                            _ => {
+                                let typ = self.parse_type()?;
+                                self.skipped(Operator::SemiColon)?;
+                                (id_list, typ)
+                            }
                         },
                         // { a, b, c ?T }
                         _ => (id_list, self.parse_type()?),
@@ -570,7 +575,7 @@ impl Parser {
         let pos = self.current_pos();
         match self.skipped(Operator::Ellipsis)? {
             true => Ok(ast::Ellipsis { pos, elt: None }.into()),
-            false => self.parse_expr(),
+            false => self.parse_next_level_expr(),
         }
     }
 
@@ -596,25 +601,19 @@ impl Parser {
         Ok(result)
     }
 
+    pub fn parse_next_level_expr(&mut self) -> Result<ast::Expression> {
+        self.expr_level += 1;
+        let expr = self.parse_expr();
+        self.expr_level -= 1;
+        expr
+    }
+
     pub fn parse_expr(&mut self) -> Result<ast::Expression> {
-        self.parse_binary_expr(1, false)
+        self.parse_binary_expr(1)
     }
 
-    fn parse_stmt_expr(&mut self) -> Result<ast::Expression> {
-        self.parse_binary_expr(1, true)
-    }
-
-    fn parse_stmt_expr_list(&mut self) -> Result<Vec<ast::Expression>> {
-        let mut result = vec![self.parse_stmt_expr()?];
-        while self.skipped(Operator::Comma)? {
-            result.push(self.parse_stmt_expr()?);
-        }
-
-        Ok(result)
-    }
-
-    fn parse_binary_expr(&mut self, prec: usize, stmt: bool) -> Result<ast::Expression> {
-        let mut expr = self.parse_unary_expr(stmt)?;
+    fn parse_binary_expr(&mut self, prec: usize) -> Result<ast::Expression> {
+        let mut expr = self.parse_unary_expr()?;
         while let Some((perc1, op)) = self.current.as_ref().and_then(|(_, tok)| match tok {
             Token::Operator(op) => (op.precedence() >= prec).then_some((op.precedence(), *op)),
             _ => None,
@@ -623,7 +622,7 @@ impl Parser {
                 op,
                 pos: self.expect(op)?,
                 left: Box::new(expr),
-                right: Box::new(self.parse_binary_expr(perc1 + 1, stmt)?),
+                right: Box::new(self.parse_binary_expr(perc1 + 1)?),
             }
             .into()
         }
@@ -631,7 +630,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_unary_expr(&mut self, stmt: bool) -> Result<ast::Expression> {
+    fn parse_unary_expr(&mut self) -> Result<ast::Expression> {
         let (pos, tok) = self.get_current()?;
         Ok(match tok {
             Token::Operator(
@@ -639,12 +638,12 @@ impl Parser {
                 @ (Operator::Add | Operator::Sub | Operator::Not | Operator::Xor | Operator::And),
             ) => {
                 self.next()?;
-                let right = Box::new(self.parse_unary_expr(stmt)?);
+                let right = Box::new(self.parse_unary_expr()?);
                 ast::UnaryExpression { pos, op, right }.into()
             }
             token::ARROW => {
                 self.next()?;
-                match self.parse_unary_expr(stmt)? {
+                match self.parse_unary_expr()? {
                     // <- CHAN_TYPE => <-chan T
                     ast::Expression::Type(ast::Type::Channel(chtyp)) => {
                         let chan_type = self.reset_chan_arrow(pos, chtyp)?;
@@ -660,10 +659,10 @@ impl Parser {
             }
             token::STAR => {
                 self.next()?;
-                let right = Box::new(self.parse_unary_expr(stmt)?);
+                let right = Box::new(self.parse_unary_expr()?);
                 ast::StarExpression { pos, right }.into()
             }
-            _ => self.parse_primary_expr(stmt)?.into(),
+            _ => self.parse_primary_expr()?.into(),
         })
     }
 
@@ -703,11 +702,11 @@ impl Parser {
     }
 
     /// follow by https://go.dev/ref/spec#Primary_expressions
-    fn parse_primary_expr(&mut self, stmt: bool) -> Result<ast::Expression> {
+    fn parse_primary_expr(&mut self) -> Result<ast::Expression> {
         // (operand, could continue forward)
         let mut expr = (self.parse_operand()?, true);
         while self.current.is_some() && expr.1 {
-            expr = self.parse_operand_right(expr.0, stmt)?;
+            expr = self.parse_operand_right(expr.0)?;
         }
 
         Ok(expr.0)
@@ -730,7 +729,7 @@ impl Parser {
             }
             Token::Operator(Operator::ParenLeft) => {
                 self.next()?;
-                let expr = self.parse_expr()?;
+                let expr = self.parse_next_level_expr()?;
                 self.expect(Operator::ParenRight)?;
                 expr
             }
@@ -738,11 +737,7 @@ impl Parser {
         })
     }
 
-    fn parse_operand_right(
-        &mut self,
-        left: ast::Expression,
-        stmt: bool,
-    ) -> Result<(ast::Expression, bool)> {
+    fn parse_operand_right(&mut self, left: ast::Expression) -> Result<(ast::Expression, bool)> {
         let left = Box::new(left);
         let (pos, tok) = self.get_current()?;
         match tok {
@@ -793,16 +788,17 @@ impl Parser {
                 let mut args = vec![];
                 while self.current_not(Operator::ParenRight) && self.current_not(Operator::Ellipsis)
                 {
-                    args.push(self.parse_expr()?);
+                    args.push(self.parse_next_level_expr()?);
                     self.skipped(Operator::Comma)?;
                 }
 
                 let current_pos = self.current_pos();
                 let ellipsis = self.skipped(Operator::Ellipsis)?.then_some(current_pos);
+                self.skipped(Operator::Comma)?; // (a, b...,)
                 let pos = (pos, self.expect(Operator::ParenRight)?);
                 Ok((ast::Call { pos, args, left, ellipsis }.into(), true))
             }
-            token::LBRACE => Ok(match self.check_brace(left.borrow(), stmt) {
+            token::LBRACE => Ok(match self.check_brace(left.borrow()) {
                 false => (*left, false),
                 true => {
                     let typ = left;
@@ -814,8 +810,9 @@ impl Parser {
         }
     }
 
+    // TODO: rewrite this with exprLevel
     /// check if brace is belong to current expression
-    fn check_brace(&self, expr: &ast::Expression, stmt: bool) -> bool {
+    fn check_brace(&self, expr: &ast::Expression) -> bool {
         match expr {
             ast::Expression::Type(
                 ast::Type::Struct(..)
@@ -825,7 +822,7 @@ impl Parser {
             ) => true,
             ast::Expression::Ident(..)
             | ast::Expression::Selector(..)
-            | ast::Expression::Index(..) => !stmt,
+            | ast::Expression::Index(..) => self.expr_level >= 0,
             _ => false,
         }
     }
@@ -843,7 +840,7 @@ impl Parser {
         }
 
         // [:... [...
-        index[colon] = Some(Box::new(self.parse_expr()?));
+        index[colon] = Some(Box::new(self.parse_next_level_expr()?));
         if self.current_is(Operator::BarackRight) {
             return Ok((index, colon == 0)); // [:a] [a]
         }
@@ -856,7 +853,7 @@ impl Parser {
         }
 
         // [:a:... [a:...
-        index[colon] = Some(Box::new(self.parse_expr()?));
+        index[colon] = Some(Box::new(self.parse_next_level_expr()?));
         if self.current_is(Operator::BarackRight) {
             return Ok((index, false)); // [:a:b] [a:b]
         }
@@ -869,18 +866,20 @@ impl Parser {
 
         // [a:b...]
         self.expect(Operator::Colon)?;
-        index[colon + 1] = Some(Box::new(self.parse_expr()?));
+        index[colon + 1] = Some(Box::new(self.parse_next_level_expr()?));
         Ok((index, false)) // [a:b:c
     }
 
     fn parse_lit_value(&mut self) -> Result<ast::LiteralValue> {
         let mut values = vec![];
+        self.expr_level += 1;
         let pos0 = self.expect(Operator::BraceLeft)?;
         while !self.current_is(Operator::BraceRight) {
             values.push(self.parse_element()?);
             self.skipped(Operator::Comma)?;
         }
 
+        self.expr_level -= 1;
         let pos1 = self.expect(Operator::BraceRight)?;
         let pos = (pos0, pos1);
         Ok(ast::LiteralValue { pos, values })
@@ -1114,12 +1113,12 @@ impl Parser {
 
     fn parse_range_expr(&mut self) -> Result<ast::RangeExpr> {
         let pos = self.expect(Keyword::Range)?;
-        let right = Box::new(self.parse_stmt_expr()?);
+        let right = Box::new(self.parse_expr()?);
         Ok(ast::RangeExpr { pos, right })
     }
 
     fn parse_simple_stmt(&mut self) -> Result<ast::Statement> {
-        let left = self.parse_stmt_expr_list()?;
+        let left = self.parse_expr_list()?;
         let (pos, tok) = self.get_current()?;
         Ok(match tok {
             Token::Operator(
@@ -1215,11 +1214,13 @@ impl Parser {
 
     fn parse_block_stmt(&mut self) -> Result<ast::BlockStmt> {
         let mut list = vec![];
+        self.expr_level += 1;
         let pos0 = self.expect(Operator::BraceLeft)?;
         while !self.current_is(Operator::BraceRight) {
             list.push(self.parse_stmt()?);
         }
 
+        self.expr_level -= 1;
         let pos = (pos0, self.expect(Operator::BraceRight)?);
         Ok(ast::BlockStmt { pos, list })
     }
@@ -1299,6 +1300,9 @@ impl Parser {
             return Err(self.else_error("mission condition in if statement"));
         }
 
+        let prev_level = self.expr_level;
+        self.expr_level = -1;
+
         let init = self
             .current_not(Operator::SemiColon)
             .then(|| match self.current_is(Keyword::Var) {
@@ -1327,12 +1331,16 @@ impl Parser {
             _ => return Err(self.else_error("cond must be boolean expression")),
         };
 
+        self.expr_level = prev_level;
         Ok((init.map(Box::new), cond))
     }
 
     fn parse_switch_stmt(&mut self) -> Result<ast::Statement> {
         let pos = self.expect(Keyword::Switch)?;
         let (mut init, mut tag) = (None, None);
+
+        let prev_level = self.expr_level;
+        self.expr_level = -1;
 
         if self.current_not(Operator::BraceLeft) {
             tag = self
@@ -1350,6 +1358,7 @@ impl Parser {
                 .map_or(Ok(None), |r| r.map(Some))?;
         };
 
+        self.expr_level = prev_level;
         let init = init.map(Box::new);
         let type_assert = self.check_switch_type_assert(&tag)?;
         let block = self.parse_case_block(type_assert)?;
@@ -1380,7 +1389,7 @@ impl Parser {
                     (self.expect(Keyword::Case)?, Keyword::Case),
                     match type_assert {
                         true => self.parse_type_list()?,
-                        false => self.parse_stmt_expr_list()?,
+                        false => self.parse_expr_list()?,
                     },
                 ),
                 _ => ((self.expect(Keyword::Default)?, Keyword::Default), vec![]),
@@ -1484,21 +1493,31 @@ impl Parser {
 
     fn parse_for_stmt(&mut self) -> Result<ast::Statement> {
         let pos = self.expect(Keyword::For)?;
+
+        let prev_level = self.expr_level;
+        self.expr_level = -1;
+
         if self.current_is(Keyword::Range) {
+            let pos = (pos, self.expect(Keyword::Range)?);
+            let expr = self.parse_expr()?;
+            self.expr_level = prev_level;
+            let body = self.parse_block_stmt()?;
+
             // for range
             return Ok(ast::RangeStmt {
                 op: None,
                 key: None,
                 value: None,
-                pos: (pos, self.expect(Keyword::Range)?),
-                expr: self.parse_stmt_expr()?,
-                body: self.parse_block_stmt()?,
+                pos,
+                expr,
+                body,
             }
             .into());
         }
 
         if self.current_is(Operator::BraceLeft) {
             // for {
+            self.expr_level = prev_level;
             let body = self.parse_block_stmt()?;
             return Ok(ast::ForStmt {
                 pos,
@@ -1530,6 +1549,7 @@ impl Parser {
 
                     let expr = *expr;
                     let pos = (pos, pos1);
+                    self.expr_level = prev_level;
                     let body = self.parse_block_stmt()?;
                     return Ok(ast::RangeStmt { pos, key, value, op, expr, body }.into());
                 }
@@ -1554,6 +1574,7 @@ impl Parser {
             }
         }
 
+        self.expr_level = prev_level;
         let body = self.parse_block_stmt()?;
         Ok(ast::ForStmt { pos, init, cond, post, body }.into())
     }
@@ -1591,7 +1612,6 @@ mod test {
         import(r#"import . "libb""#)?;
         import(r#"import _ "libc""#)?;
         import(r#"import d "libd""#)?;
-        import("import (\"a\"\n. \"b\"\n_ \"c\"\nd \"d\")")?;
 
         assert!(import("import _").is_err());
         assert!(import("import _ _").is_err());
@@ -1846,6 +1866,7 @@ mod test {
         stmt("{ _ = &AnyList{1, '1'} }")?;
         stmt("defer close() //\na = 1;")?;
         stmt("fmt.Sprintf(`123`, rand.Int()%99);")?;
+        stmt("Update(a, x...,)")?;
 
         Ok(())
     }
@@ -1881,6 +1902,7 @@ mod test {
         fors("for loop {};")?;
         fors("for i := 0; i < 1; {};")?;
         fors("for i := 0; i < 1; i++ {};")?;
+        fors("for i := 0; i < 10; i = i + n {}")?;
 
         Ok(())
     }
@@ -1908,6 +1930,7 @@ mod test {
 
         switch("switch x {}")?;
         switch("switch x;x.(type) {}")?;
+        switch("switch prev := r.descsByName[name]; prev.(type) {}")?;
         switch(
             "switch tag {
             default: s3()
@@ -1919,6 +1942,14 @@ mod test {
             "switch x := f(); {
             case x < 0: return -x
             default: return x
+            }",
+        )?;
+        switch(
+            "
+        switch a := x; c.(type) {
+            case nil, *d:
+            default:
+        
             }",
         )?;
 

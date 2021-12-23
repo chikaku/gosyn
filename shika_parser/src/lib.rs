@@ -4,6 +4,7 @@
 #![feature(trait_alias)]
 #![feature(custom_inner_attributes)]
 #![feature(destructuring_assignment)]
+#![feature(stmt_expr_attributes)]
 
 pub mod ast;
 mod ast_impl;

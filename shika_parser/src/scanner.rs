@@ -1,7 +1,6 @@
 use crate::token::Operator;
 use crate::token::Token;
 use crate::{Keyword, LitKind};
-use std::collections::VecDeque;
 use std::str::FromStr;
 
 use unic_ucd_category::GeneralCategory;
@@ -23,9 +22,7 @@ pub struct Scanner {
     index: usize,
     source: String,
     lines: Vec<usize>,
-
-    prev: Option<Token>,
-    next: VecDeque<PosTok>,
+    semicolon: bool,
 }
 
 impl Scanner {
@@ -77,24 +74,43 @@ impl Scanner {
         source.chars().take(n).collect()
     }
 
-    fn try_insert_semicolon(&mut self, pos: usize) {
-        match self.prev {
-            Some(
-                Token::Literal(..)
-                | Token::Operator(
-                    Operator::Inc
-                    | Operator::Dec
-                    | Operator::ParenRight
-                    | Operator::BraceRight
-                    | Operator::BarackRight,
-                )
-                | Token::Keyword(
-                    Keyword::Break | Keyword::Continue | Keyword::FallThrough | Keyword::Return,
-                ),
-            ) => self
-                .next
-                .push_front((pos, Token::Operator(Operator::SemiColon))),
-            _ => {}
+    #[rustfmt::skip]
+    fn try_insert_semicolon2(&mut self, tok: &Token) -> bool {
+        matches!(
+            tok,
+            | &Token::Literal(..)
+            | &Token::Operator(Operator::Inc)
+            | &Token::Operator(Operator::Dec)
+            | &Token::Operator(Operator::ParenRight)
+            | &Token::Operator(Operator::BraceRight)
+            | &Token::Operator(Operator::BarackRight)
+            | &Token::Keyword(Keyword::Break)
+            | &Token::Keyword(Keyword::Return)
+            | &Token::Keyword(Keyword::Continue)
+            | &Token::Keyword(Keyword::FallThrough)
+        )
+    }
+
+    fn line_ended(&mut self) -> bool {
+        let mut chars = self.source[self.index..].chars().peekable();
+
+        loop {
+            match chars.next() {
+                None | Some('\n') => return true,
+                Some(c) if c.is_whitespace() => continue,
+                Some('/') => match chars.next() {
+                    Some('/') => return true,
+                    Some('*') => loop {
+                        match chars.next() {
+                            None | Some('\n') => return true,
+                            Some('*') if chars.next_if_eq(&'/').is_some() => break,
+                            _ => continue,
+                        }
+                    },
+                    _ => return false,
+                },
+                _ => return false,
+            }
         }
     }
 
@@ -104,8 +120,6 @@ impl Scanner {
             if ch.is_whitespace() {
                 if ch == '\n' {
                     self.add_line(self.pos + 1);
-                    self.try_insert_semicolon(self.pos);
-                    self.prev = Some(Operator::SemiColon.into());
                 }
 
                 skipped += 1;
@@ -120,15 +134,17 @@ impl Scanner {
     }
 
     pub fn next_token(&mut self) -> Result<Option<PosTok>> {
-        if let Some(pos_tok) = self.next.pop_back() {
-            return Ok(Some(pos_tok));
+        if self.semicolon {
+            if self.line_ended() {
+                let pos = self.pos;
+                let tok = Token::Operator(Operator::SemiColon);
+                self.semicolon = false;
+                return Ok(Some((pos, tok)));
+            }
         }
 
+        self.semicolon = false;
         self.skip_whitespace();
-        if let Some(pos_tok) = self.next.pop_back() {
-            return Ok(Some(pos_tok));
-        }
-
         Ok(match self.index >= self.source.len() {
             true => None,
             false => {
@@ -137,7 +153,7 @@ impl Scanner {
                 self.add_token_cross_line(&tok);
                 self.index += tok.len();
                 self.pos += tok.char_count();
-                self.prev = Some(tok.clone());
+                self.semicolon = self.try_insert_semicolon2(&tok);
                 Some((current, tok))
             }
         })
@@ -510,11 +526,34 @@ mod tests {
     use crate::{token::Token, Operator};
 
     #[test]
+    fn line_ended() {
+        let ended = |s| Scanner::new(s).line_ended();
+
+        assert_eq!(ended("1"), false);
+        assert_eq!(ended("//"), true);
+        assert_eq!(ended("/**/"), true);
+        assert_eq!(ended("/**/123"), false);
+        assert_eq!(ended("/*\n*/"), true);
+        assert_eq!(ended("/**/ //"), true);
+    }
+
+    #[test]
     fn insert_semicolon() {
+        let semi = Token::Operator(Operator::SemiColon);
+
         let mut scan = Scanner::new("return//\nreturn");
-        scan.next_token().unwrap();
-        let next = scan.next_token().unwrap();
-        assert_eq!(next.unwrap().1, Token::Operator(Operator::SemiColon));
+        let mut next = move || scan.next_token().unwrap().unwrap().1;
+        assert_ne!(next(), semi);
+        assert_eq!(next(), semi);
+        assert_ne!(next(), semi);
+
+        let mut scan = Scanner::new("a\nb\nc");
+        let mut next = move || scan.next_token().unwrap().unwrap().1;
+        assert_ne!(next(), semi);
+        assert_eq!(next(), semi);
+        assert_ne!(next(), semi);
+        assert_eq!(next(), semi);
+        assert_ne!(next(), semi);
     }
 
     #[test]
