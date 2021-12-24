@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 shika_proc_macro = { path = "../shika_proc_macro" }
 unic-ucd-category = "0.9.0"
-ouroboros = "0.14.0"
 
 [dev-dependencies]
 shika_tool = { path = "../shika_tool" }
+pprof = { version = "0.6.2", features = ["flamegraph", "protobuf"] }

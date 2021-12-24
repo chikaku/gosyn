@@ -1,28 +1,61 @@
 #![feature(generators)]
 
+use pprof::protos::Message;
 use shika_parser::Parser;
 use shika_parser::Result;
 use shika_tool::Walkdir;
 use std::env;
 use std::fs;
+use std::io::Write;
+use std::path::Path;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-#[allow(unused)]
-fn parse_source(source: String) -> Result<Duration> {
+fn resolve<P: AsRef<Path>>(path: P) -> PathBuf {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    root.join(path)
+}
+
+fn parse_source<P: AsRef<Path>>(source: String, path: P) -> Result<Duration> {
     let clock = Instant::now();
     Parser::from_str(source)
         .parse_file()
         .map(|_| clock.elapsed())
+        .map_err(|err| err.with_path(path))
+}
+
+#[test]
+fn pprof_parser() {
+    // kubernetes/vendor/google.golang.org/api/compute/v0.beta/compute-gen.go
+    let path = resolve("tests/compute-gen.txt");
+    if !path.exists() {
+        return;
+    }
+
+    let source = fs::read_to_string(&path).unwrap();
+    let guard = pprof::ProfilerGuard::new(1000).unwrap();
+    let elapsed = parse_source(source, &path).unwrap();
+    println!("finished! {}ms", elapsed.as_millis());
+
+    let report = guard.report().build().unwrap();
+    let file = fs::File::create("flamegraph.svg").unwrap();
+    report.flamegraph(file).unwrap();
+
+    let mut file = fs::File::create("profile.pb").unwrap();
+    let profile = report.pprof().unwrap();
+    let mut content = Vec::new();
+    profile.encode(&mut content).unwrap();
+    file.write_all(&content).unwrap();
 }
 
 #[test]
 fn test_exception_file() -> Result<()> {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let path = root.join("tests/exception.txt");
-    if path.is_file() {
-        let source = fs::read_to_string(&path)?;
-        parse_source(source)?;
+    let file = resolve("tests/exception.txt");
+    if file.exists() {
+        let source = fs::read_to_string(&file)?;
+        if source.lines().count() > 1 {
+            parse_source(source, file)?;
+        }
     }
 
     Ok(())
@@ -35,26 +68,14 @@ fn test_third_party_projects() -> Result<()> {
         _ => return Ok(()),
     };
 
-    for entry in root.read_dir()? {
-        if let Ok(object) = entry {
-            let mut walk = Walkdir::new(object.path())?.with_ext("go")?;
-            while let Some(path) = walk.next()? {
-                let f = fs::File::open(&path)?;
-                if f.metadata()?.len() > 1024 * 1024 {
-                    continue;
-                }
-
-                let source = fs::read_to_string(&path)?;
-                println!(
-                    "{}: {}",
-                    path.as_path().strip_prefix(&root).unwrap().display(),
-                    match parse_source(source) {
-                        Ok(elapsed) => format!("{}μs", elapsed.as_micros()),
-                        Err(err) => format!("\n{:?}\n", err),
-                    }
-                );
-            }
-        }
+    let path = root.as_path();
+    let mut walk = Walkdir::new(path)?.with_ext("go")?;
+    while let Some(path) = walk.next()? {
+        println!(
+            "{}: {}μs",
+            path.as_path().strip_prefix(&root).unwrap().display(),
+            parse_source(fs::read_to_string(&path)?, &path)?.as_micros(),
+        );
     }
 
     Ok(())

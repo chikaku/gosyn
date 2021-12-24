@@ -1,12 +1,11 @@
+use crate::token::Keyword;
+use crate::token::LitKind;
 use crate::token::Operator;
 use crate::token::Token;
-use crate::{Keyword, LitKind};
+use crate::Pos;
+use crate::PosTok;
 use std::str::FromStr;
-
 use unic_ucd_category::GeneralCategory;
-
-pub type Pos = usize;
-pub type PosTok = (Pos, Token);
 
 #[derive(PartialEq, Debug)]
 pub struct Error {
@@ -523,7 +522,8 @@ fn is_escaped_char(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::Scanner;
-    use crate::{token::Token, Operator};
+    use crate::token::Operator;
+    use crate::token::Token;
 
     #[test]
     fn line_ended() {

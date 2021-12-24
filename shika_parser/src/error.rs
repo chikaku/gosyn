@@ -1,10 +1,10 @@
-use crate::Token;
-use crate::TokenKind;
+use crate::token::Token;
+use crate::token::TokenKind;
+use shika_proc_macro::EnumFrom;
 use std::fmt::{Debug, Formatter};
 use std::io;
+use std::path::Path;
 use std::path::PathBuf;
-
-use shika_proc_macro::EnumFrom;
 
 #[derive(EnumFrom)]
 pub enum Error {
@@ -21,6 +21,20 @@ pub enum Error {
         location: (usize, usize),
         reason: String,
     },
+}
+
+impl Error {
+    /// reset source path
+    pub fn with_path<P: AsRef<Path>>(self, path: P) -> Error {
+        let path = path.as_ref().into();
+        match self {
+            Error::IO(ioerr) => Error::IO(ioerr),
+            Self::Else { location, reason, .. } => Error::Else { path, location, reason },
+            Self::UnexpectedToken { location, expect, actual, .. } => {
+                Error::UnexpectedToken { location, expect, actual, path }
+            }
+        }
+    }
 }
 
 impl Debug for Error {

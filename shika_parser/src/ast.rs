@@ -1,12 +1,11 @@
-use crate::Keyword;
-use crate::LitKind;
-use crate::Operator;
+use crate::token::Keyword;
+use crate::token::LitKind;
+use crate::token::Operator;
 use crate::Pos;
-use std::path::PathBuf;
-use std::rc::Rc;
-
 use shika_proc_macro::EnumFromWrapped;
 use shika_proc_macro::EnumIntoWrapped;
+use std::path::PathBuf;
+use std::rc::Rc;
 
 pub struct Comment {
     pub pos: Pos,
