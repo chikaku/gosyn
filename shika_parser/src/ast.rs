@@ -5,7 +5,6 @@ use crate::Pos;
 use shika_proc_macro::EnumFromWrapped;
 use shika_proc_macro::EnumIntoWrapped;
 use std::path::PathBuf;
-use std::rc::Rc;
 
 pub struct Comment {
     pub pos: Pos,
@@ -51,7 +50,6 @@ pub struct Field {
     pub name: Vec<Ident>,
     pub typ: Expression,
     pub tag: Option<StringLit>,
-    // TODO: doc and line comment
 }
 
 #[derive(Default)]
@@ -236,7 +234,6 @@ pub struct Decl<T> {
 
 #[derive(Default)]
 pub struct VarSpec {
-    pub docs: Vec<Rc<Comment>>,
     pub name: Vec<Ident>,
     pub typ: Option<Type>,
     pub values: Vec<Expression>,
@@ -244,14 +241,12 @@ pub struct VarSpec {
 
 #[derive(Default)]
 pub struct ConstSpec {
-    pub docs: Vec<Rc<Comment>>,
     pub name: Vec<Ident>,
     pub typ: Option<Type>,
     pub values: Vec<Expression>,
 }
 
 pub struct TypeSpec {
-    pub docs: Vec<Rc<Comment>>,
     pub alias: bool,
     pub name: Ident,
     pub typ: Type,
@@ -433,7 +428,6 @@ pub enum Statement {
 
 #[derive(Default)]
 pub struct Import {
-    pub docs: Vec<Rc<Comment>>,
     pub name: Option<Ident>,
     pub path: StringLit,
 }
@@ -442,10 +436,7 @@ pub struct Import {
 pub struct File {
     pub path: PathBuf,
     pub line_info: Vec<usize>,
-
     pub pkg_name: Ident,
-    pub document: Vec<Rc<Comment>>,
-    pub comments: Vec<Rc<Comment>>,
     pub imports: Vec<Import>,
     pub decl: Vec<Declaration>,
 }

@@ -17,7 +17,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Default)]
 pub struct Scanner {
-    pub pos: usize,
+    pos: usize,
     index: usize,
     source: String,
     lines: Vec<usize>,
@@ -179,7 +179,7 @@ impl Scanner {
 
         if let Some(tok) = match self.next_nchar(2).as_str() {
             "//" => Some(Token::Comment(self.scan_line_comment())),
-            "/*" => Some(Token::Comment(self.scan_general_comment()?)), // TODO: add line info
+            "/*" => Some(Token::Comment(self.scan_general_comment()?)),
             two => Operator::from_str(two).ok().map(|op| op.into()),
         } {
             return Ok(tok);
