@@ -1,9 +1,9 @@
 #![feature(generators)]
 
 use pprof::protos::Message;
-use shika_parser::Parser;
-use shika_parser::Result;
-use shika_tool::Walkdir;
+use shika_syntax::Parser;
+use shika_syntax::Result;
+use shika_util::Walkdir;
 use std::env;
 use std::fs;
 use std::io::Write;

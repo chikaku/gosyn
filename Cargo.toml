@@ -1,6 +1,6 @@
 [workspace]
 members = [
     "shika_proc_macro",
-    "shika_parser",
-    "shika_tool",
+    "shika_syntax",
+    "shika_util",
 ]

@@ -1,6 +1,7 @@
 use crate::ast;
 use crate::ast::ChanMode;
 use crate::ast::{BasicLit, ChannelType};
+use crate::ast_impl::Spec;
 use crate::scanner::Scanner;
 use crate::token;
 use crate::token::IntoKind;
@@ -20,10 +21,11 @@ use std::vec;
 pub struct Parser {
     path: PathBuf,
     scan: Scanner,
+    comments: Vec<Rc<ast::Comment>>, // all comments
 
     expr_level: i32,
-    current: Option<PosTok>,
     lead_comments: Vec<Rc<ast::Comment>>,
+    current: Option<PosTok>,
 }
 
 impl Parser {
@@ -140,20 +142,27 @@ impl Parser {
     }
 
     fn next(&mut self) -> Result<Option<&PosTok>> {
-        // TODO: handle pragma
+        let mut line = 0;
         let mut pos_tok = self.scan_next()?;
         while let Some((pos, Token::Comment(text))) = pos_tok {
-            let comment = Rc::new(ast::Comment { pos, text });
-            self.lead_comments.push(comment.clone());
-            if self.scan.skip_whitespace() > 0 {
+            if self.scan.line_info(pos).0 > line + 1 {
                 self.lead_comments.clear();
             }
 
+            let ended = self.scan.position();
+            line = self.scan.line_info(ended).0;
+            let comment = Rc::new(ast::Comment { pos, text });
+            self.comments.push(comment.clone());
+            self.lead_comments.push(comment.clone());
             pos_tok = self.scan_next()?;
         }
 
         self.current = pos_tok;
         Ok(self.current.as_ref())
+    }
+
+    fn drain_comments(&mut self) -> Vec<Rc<ast::Comment>> {
+        self.lead_comments.drain(0..).collect()
     }
 }
 
@@ -193,10 +202,12 @@ impl Parser {
         let mut file = ast::File::default();
         file.path = self.path.clone();
 
+        file.docs = self.drain_comments();
         file.pkg_name = self.parse_package()?;
         self.skipped(Operator::SemiColon)?;
 
         // match Import declaration
+        // ignore import relative pragma
         while self.current_is(Keyword::Import) {
             file.imports.extend(self.parse_import_decl()?);
             self.skipped(Operator::SemiColon)?;
@@ -217,6 +228,7 @@ impl Parser {
             });
         }
 
+        file.comments.extend(self.comments.drain(0..));
         Ok(file)
     }
 
@@ -280,6 +292,7 @@ impl Parser {
     }
 
     fn parse_func_decl(&mut self) -> Result<ast::FuncDecl> {
+        let docs = self.drain_comments();
         self.expect(Keyword::Func)?;
         let recv = self
             .current_is(Operator::ParenLeft)
@@ -297,17 +310,18 @@ impl Parser {
             .map_or(Ok(None), |x| x.map(Some))?;
 
         self.skipped(Operator::SemiColon)?;
-        Ok(ast::FuncDecl { name, typ, recv, body })
+        Ok(ast::FuncDecl { docs, name, typ, recv, body })
     }
 
-    fn parse_decl<T, F: FnMut(&mut Parser, usize) -> Result<T>>(
+    fn parse_decl<S: Spec, F: FnMut(&mut Parser, usize) -> Result<S>>(
         &mut self,
         mut parse_spec: F,
-    ) -> Result<ast::Decl<T>> {
+    ) -> Result<ast::Decl<S>> {
         let mut specs = vec![];
         let pos0 = self.current_pos();
-        self.next()?;
+        let docs = self.drain_comments();
 
+        self.next()?;
         if self.current_is(Operator::ParenLeft) {
             let mut index = 0;
             let left = self.expect(Operator::ParenLeft)?;
@@ -320,17 +334,18 @@ impl Parser {
             let right = self.expect(Operator::ParenRight)?;
             let pos1 = Some((left, right));
             self.skipped(Operator::SemiColon)?;
-            return Ok(ast::Decl { pos0, specs, pos1 });
+            return Ok(ast::Decl { docs, pos0, specs, pos1 });
         }
 
         let pos1 = None;
-        specs.push(parse_spec(self, 0)?);
+        specs.push(parse_spec(self, 0)?.with_docs(docs));
         self.skipped(Operator::SemiColon)?;
-        Ok(ast::Decl { pos0, specs, pos1 })
+        Ok(ast::Decl { docs: vec![], pos0, specs, pos1 })
     }
 
     fn parse_type_spec(&mut self, _: usize) -> Result<ast::TypeSpec> {
         Ok(ast::TypeSpec {
+            docs: self.drain_comments(),
             name: self.parse_ident()?,
             alias: self.skipped(Operator::Assign)?,
             typ: self.parse_type()?,
@@ -339,6 +354,7 @@ impl Parser {
 
     fn parse_var_spec(&mut self, _: usize) -> Result<ast::VarSpec> {
         let mut spec = ast::VarSpec::default();
+        spec.docs = self.drain_comments();
         spec.name = self.parse_ident_list()?;
         match self.skipped(Operator::Assign)? {
             true => spec.values = self.parse_expr_list()?,
@@ -360,6 +376,7 @@ impl Parser {
 
     fn parse_const_spec(&mut self, index: usize) -> Result<ast::ConstSpec> {
         let mut spec = ast::ConstSpec::default();
+        spec.docs = self.drain_comments();
         spec.name = self.parse_ident_list()?;
         match self.skipped(Operator::Assign)? {
             true => spec.values = self.parse_expr_list()?,
@@ -793,7 +810,7 @@ impl Parser {
                     match is_index {
                         true => {
                             let [index, ..] = index;
-                            let index = index.expect("index should't be empty");
+                            let index = index.expect("index shouldn't be empty");
                             ast::Index { pos, left, index }.into()
                         }
                         false => ast::Slice { pos, left, index }.into(),
@@ -1219,7 +1236,7 @@ impl Parser {
             list.first()
                 .map(|expr| expr.pos())
                 .unwrap_or(self.current_pos()),
-            "expect single epxression",
+            "expect single expression",
         ))
     }
 
@@ -1618,7 +1635,7 @@ impl Parser {
 
 #[cfg(test)]
 mod test {
-    use crate::ast::{ChanMode, ChannelType, Type};
+    use crate::ast::{ChanMode, ChannelType, Declaration, Type};
     use crate::parser::Parser;
     use crate::Result;
 
@@ -1862,7 +1879,7 @@ mod test {
         struct_("struct {a int; b bool}")?;
         struct_("struct {a int\nb bool}")?;
         struct_("struct {a int ``; b bool}")?;
-        struct_("struct {microsec  uint64 `protobuf:\"1\"`}")?;
+        struct_("struct {micro uint64 `protobuf:\"1\"`}")?;
 
         assert!(struct_("struct {*[]a}").is_err());
         assert!(struct_("struct {**T2}").is_err());
@@ -2008,6 +2025,55 @@ mod test {
         stmt("if true {} else if false {} else {};")?;
 
         assert!(stmt("if true {} else false {};").is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_docs() -> Result<()> {
+        static CODE: &'static str = "
+        // comments...
+
+        // docs for file
+        package main
+
+        // docs for type declaration
+        type empty struct{}
+
+        // comments...
+
+        // docs for variable declaration
+        /* 123 */ /* 456 */
+        var (
+            // docs for spec
+            ints = 1
+        )
+
+        /* 123 
+        
+        123
+        */
+        // docs for function declaration
+        func main() {}
+        ";
+
+        let mut ast = Parser::from_str(CODE).parse_file()?;
+
+        assert_eq!(ast.docs.len(), 1);
+        while let Some(decl) = ast.decl.pop() {
+            match decl {
+                Declaration::Const(..) => continue,
+                Declaration::Function(x) => assert_eq!(x.docs.len(), 2),
+                Declaration::Type(x) => {
+                    assert_eq!(x.docs.len(), 0);
+                    assert_eq!(x.specs[0].docs.len(), 1)
+                }
+                Declaration::Variable(x) => {
+                    assert_eq!(x.docs.len(), 3);
+                    assert_eq!(x.specs[0].docs.len(), 1);
+                }
+            }
+        }
 
         Ok(())
     }

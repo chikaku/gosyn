@@ -1,5 +1,5 @@
 [package]
-name = "shika_parser"
+name = "shika_syntax"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,5 +10,5 @@ shika_proc_macro = { path = "../shika_proc_macro" }
 unic-ucd-category = "0.9.0"
 
 [dev-dependencies]
-shika_tool = { path = "../shika_tool" }
+shika_util = { path = "../shika_util" }
 pprof = { version = "0.6.2", features = ["flamegraph", "protobuf"] }

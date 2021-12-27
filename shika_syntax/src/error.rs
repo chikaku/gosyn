@@ -28,7 +28,7 @@ impl Error {
     pub fn with_path<P: AsRef<Path>>(self, path: P) -> Error {
         let path = path.as_ref().into();
         match self {
-            Error::IO(ioerr) => Error::IO(ioerr),
+            Error::IO(err) => Error::IO(err),
             Self::Else { location, reason, .. } => Error::Else { path, location, reason },
             Self::UnexpectedToken { location, expect, actual, .. } => {
                 Error::UnexpectedToken { location, expect, actual, path }

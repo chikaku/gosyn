@@ -1,7 +1,9 @@
 use crate::ast::{
-    AssignStmt, BasicLit, Ellipsis, Expression, Field, FieldList, Ident, StringLit, Type, TypeName,
+    AssignStmt, BasicLit, Comment, ConstSpec, Ellipsis, Expression, Field, FieldList, Ident,
+    StringLit, Type, TypeName, TypeSpec, VarSpec,
 };
 use crate::token::LitKind;
+use std::rc::Rc;
 
 impl From<Ident> for TypeName {
     fn from(id: Ident) -> Self {
@@ -119,5 +121,30 @@ impl Expression {
             Expression::TypeAssert(x) => x.left.pos(),
             Expression::CompositeLit(x) => x.typ.pos(),
         }
+    }
+}
+
+pub(crate) trait Spec {
+    fn with_docs(self, docs: Vec<Rc<Comment>>) -> Self;
+}
+
+impl Spec for VarSpec {
+    fn with_docs(mut self, docs: Vec<Rc<Comment>>) -> VarSpec {
+        self.docs = docs;
+        self
+    }
+}
+
+impl Spec for TypeSpec {
+    fn with_docs(mut self, docs: Vec<Rc<Comment>>) -> TypeSpec {
+        self.docs = docs;
+        self
+    }
+}
+
+impl Spec for ConstSpec {
+    fn with_docs(mut self, docs: Vec<Rc<Comment>>) -> ConstSpec {
+        self.docs = docs;
+        self
     }
 }
