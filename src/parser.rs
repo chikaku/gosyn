@@ -29,7 +29,7 @@ pub struct Parser {
 }
 
 impl Parser {
-    /// parse input source, path will be <input>
+    /// parse input source to `ast::File`, path will be \<input\>
     pub fn from_str<S: AsRef<str>>(s: S) -> Self {
         let mut parser = Self::default();
         parser.path = PathBuf::from("<input>");
@@ -39,7 +39,7 @@ impl Parser {
         parser
     }
 
-    /// read file content and parse to ast
+    /// read file content and parse to `ast::File`
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let source = fs::read_to_string(path.as_ref())?;
         let mut parser = Parser::default();
@@ -198,6 +198,8 @@ impl Parser {
 }
 
 impl Parser {
+    /// parse source into golang file
+    /// including imports and `type`, `var`, `const` declarations
     pub fn parse_file(&mut self) -> Result<ast::File> {
         let mut file = ast::File::default();
         file.path = self.path.clone();
@@ -636,7 +638,7 @@ impl Parser {
         expr
     }
 
-    #[inline]
+    /// parse source into golang Expression
     pub fn parse_expr(&mut self) -> Result<ast::Expression> {
         self.parse_binary_expr(1)
     }
@@ -1118,7 +1120,8 @@ impl Parser {
         }
     }
 
-    fn parse_stmt(&mut self) -> Result<ast::Statement> {
+    /// parse source into golang Statement
+    pub fn parse_stmt(&mut self) -> Result<ast::Statement> {
         let (pos, tok) = self.get_current();
         match tok {
             Token::Literal(..)

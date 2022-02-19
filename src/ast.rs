@@ -1,9 +1,11 @@
+//! Define all golang syntax node
+
 use crate::token::Keyword;
 use crate::token::LitKind;
 use crate::token::Operator;
 use crate::Pos;
-use shika_proc_macro::EnumFromWrapped;
-use shika_proc_macro::EnumIntoWrapped;
+use roset::EnumFromWrapped;
+use roset::EnumIntoWrapped;
 use std::path::PathBuf;
 use std::rc::Rc;
 

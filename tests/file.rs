@@ -1,15 +1,15 @@
-#![feature(generators)]
+mod walkdir;
 
+use gosyn::Parser;
+use gosyn::Result;
 use pprof::protos::Message;
-use shika_syntax::Parser;
-use shika_syntax::Result;
-use shika_util::Walkdir;
 use std::env;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+use walkdir::Walkdir;
 
 fn resolve<P: AsRef<Path>>(path: P) -> PathBuf {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

@@ -1,4 +1,6 @@
-use shika_proc_macro::EnumFrom;
+//! Define all golang syntax token
+
+use roset::EnumFrom;
 use std::fmt::{Debug, Formatter};
 
 #[derive(Copy, Clone, Eq, PartialEq, EnumFrom, Debug)]
@@ -264,7 +266,7 @@ impl Token {
     }
 }
 
-pub trait IntoKind = Into<TokenKind> + Copy;
+pub(crate) trait IntoKind = Into<TokenKind> + Copy;
 
 #[derive(Eq, PartialEq, EnumFrom, Copy, Clone)]
 pub enum TokenKind {

@@ -1,6 +1,11 @@
-[workspace]
-members = [
-    "shika_proc_macro",
-    "shika_syntax",
-    "shika_util",
-]
+[package]
+name = "gosyn"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+unic-ucd-category = "0.9.0"
+roset = { git = "https://github.com/chikaku/roset" }
+
+[dev-dependencies]
+pprof = { version = "0.6.2", features = ["flamegraph", "protobuf"] }

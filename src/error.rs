@@ -1,21 +1,26 @@
 use crate::token::Token;
 use crate::token::TokenKind;
-use shika_proc_macro::EnumFrom;
+use roset::EnumFrom;
 use std::fmt::{Debug, Formatter};
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 
+/// indicates all possible errors during parsing
 #[derive(EnumFrom)]
 pub enum Error {
+    /// wrap system IO errors, usually an open error when opening the given path
     #[enum_from(inner)]
     IO(io::Error),
+    /// syntax error such as some token are not in the right position
     UnexpectedToken {
         path: PathBuf,
         location: (usize, usize),
         expect: Vec<TokenKind>,
         actual: Option<Token>,
     },
+    /// some other parser errors include scanner errors
+    /// such as parsing numeric literal errors
     Else {
         path: PathBuf,
         location: (usize, usize),
