@@ -4,8 +4,6 @@ use crate::token::Keyword;
 use crate::token::LitKind;
 use crate::token::Operator;
 use crate::Pos;
-use roset::EnumFromWrapped;
-use roset::EnumIntoWrapped;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -90,7 +88,6 @@ pub struct InterfaceType {
     pub methods: FieldList,
 }
 
-#[derive(EnumFromWrapped, EnumIntoWrapped)]
 pub enum Type {
     Map(MapType),             // map[K]V
     Ident(TypeName),          // pkg.Type
@@ -122,7 +119,6 @@ pub struct FuncLit {
     pub body: Option<BlockStmt>,
 }
 
-#[derive(EnumFromWrapped)]
 pub enum Element {
     Expr(Expression),
     LitValue(LiteralValue),
@@ -207,7 +203,6 @@ pub struct RangeExpr {
     pub right: Box<Expression>,
 }
 
-#[derive(EnumFromWrapped, EnumIntoWrapped)]
 pub enum Expression {
     Type(Type),
     Call(Call),
@@ -267,7 +262,6 @@ pub struct FuncDecl {
     pub body: Option<BlockStmt>,
 }
 
-#[derive(EnumFromWrapped)]
 pub enum Declaration {
     Function(FuncDecl),
     Type(Decl<TypeSpec>),
@@ -282,7 +276,6 @@ pub struct BlockStmt {
     pub list: Vec<Statement>,
 }
 
-#[derive(EnumFromWrapped)]
 pub enum DeclStmt {
     Type(Decl<TypeSpec>),
     Const(Decl<ConstSpec>),
@@ -412,7 +405,6 @@ pub struct EmptyStmt {
     pub pos: usize,
 }
 
-#[derive(EnumFromWrapped)]
 pub enum Statement {
     Go(GoStmt),
     If(IfStmt),

@@ -1,16 +1,13 @@
 use crate::token::Token;
 use crate::token::TokenKind;
-use roset::EnumFrom;
 use std::fmt::{Debug, Formatter};
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 
 /// indicates all possible errors during parsing
-#[derive(EnumFrom)]
 pub enum Error {
     /// wrap system IO errors, usually an open error when opening the given path
-    #[enum_from(inner)]
     IO(io::Error),
     /// syntax error such as some token are not in the right position
     UnexpectedToken {
@@ -26,6 +23,12 @@ pub enum Error {
         location: (usize, usize),
         reason: String,
     },
+}
+
+impl From<io::Error> for Error {
+    fn from(err: io::Error) -> Self {
+        Error::IO(err)
+    }
 }
 
 impl Error {

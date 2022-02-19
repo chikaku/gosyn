@@ -1,169 +1,170 @@
 //! Define all golang syntax token
 
-use roset::EnumFrom;
 use std::fmt::{Debug, Formatter};
+use strum::EnumString;
+use strum::IntoStaticStr;
 
-#[derive(Copy, Clone, Eq, PartialEq, EnumFrom, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, EnumString, IntoStaticStr)]
 pub enum Operator {
-    #[enum_from(str = "+")]
+    #[strum(serialize = "+")]
     Add,
-    #[enum_from(str = "-")]
+    #[strum(serialize = "-")]
     Sub,
-    #[enum_from(str = "*")]
+    #[strum(serialize = "*")]
     Star,
-    #[enum_from(str = "/")]
+    #[strum(serialize = "/")]
     Quo,
-    #[enum_from(str = "%")]
+    #[strum(serialize = "%")]
     Rem,
 
-    #[enum_from(str = "&")]
+    #[strum(serialize = "&")]
     And,
-    #[enum_from(str = "|")]
+    #[strum(serialize = "|")]
     Or,
-    #[enum_from(str = "^")]
+    #[strum(serialize = "^")]
     Xor,
-    #[enum_from(str = "<<")]
+    #[strum(serialize = "<<")]
     Shl,
-    #[enum_from(str = ">>")]
+    #[strum(serialize = ">>")]
     Shr,
-    #[enum_from(str = "&^")]
+    #[strum(serialize = "&^")]
     AndNot,
 
-    #[enum_from(str = "+=")]
+    #[strum(serialize = "+=")]
     AddAssign,
-    #[enum_from(str = "-=")]
+    #[strum(serialize = "-=")]
     SubAssign,
-    #[enum_from(str = "*=")]
+    #[strum(serialize = "*=")]
     MulAssign,
-    #[enum_from(str = "/=")]
+    #[strum(serialize = "/=")]
     QuoAssign,
-    #[enum_from(str = "%=")]
+    #[strum(serialize = "%=")]
     RemAssign,
 
-    #[enum_from(str = "&=")]
+    #[strum(serialize = "&=")]
     AndAssign,
-    #[enum_from(str = "|=")]
+    #[strum(serialize = "|=")]
     OrAssign,
-    #[enum_from(str = "^=")]
+    #[strum(serialize = "^=")]
     XorAssign,
-    #[enum_from(str = "<<=")]
+    #[strum(serialize = "<<=")]
     ShlAssign,
-    #[enum_from(str = ">>=")]
+    #[strum(serialize = ">>=")]
     ShrAssign,
-    #[enum_from(str = "&^=")]
+    #[strum(serialize = "&^=")]
     AndNotAssign,
 
-    #[enum_from(str = "&&")]
+    #[strum(serialize = "&&")]
     AndAnd,
-    #[enum_from(str = "||")]
+    #[strum(serialize = "||")]
     OrOr,
-    #[enum_from(str = "<-")]
+    #[strum(serialize = "<-")]
     Arrow,
-    #[enum_from(str = "++")]
+    #[strum(serialize = "++")]
     Inc,
-    #[enum_from(str = "--")]
+    #[strum(serialize = "--")]
     Dec,
 
-    #[enum_from(str = "==")]
+    #[strum(serialize = "==")]
     Equal,
-    #[enum_from(str = "<")]
+    #[strum(serialize = "<")]
     Less,
-    #[enum_from(str = ">")]
+    #[strum(serialize = ">")]
     Greater,
-    #[enum_from(str = "=")]
+    #[strum(serialize = "=")]
     Assign,
-    #[enum_from(str = "!")]
+    #[strum(serialize = "!")]
     Not,
 
-    #[enum_from(str = ":=")]
+    #[strum(serialize = ":=")]
     Define,
-    #[enum_from(str = "!=")]
+    #[strum(serialize = "!=")]
     NotEqual,
-    #[enum_from(str = "<=")]
+    #[strum(serialize = "<=")]
     LessEqual,
-    #[enum_from(str = ">=")]
+    #[strum(serialize = ">=")]
     GreaterEqual,
-    #[enum_from(str = "...")]
+    #[strum(serialize = "...")]
     Ellipsis,
 
-    #[enum_from(str = "(")]
+    #[strum(serialize = "(")]
     ParenLeft,
-    #[enum_from(str = ")")]
+    #[strum(serialize = ")")]
     ParenRight,
-    #[enum_from(str = "[")]
+    #[strum(serialize = "[")]
     BarackLeft,
-    #[enum_from(str = "]")]
+    #[strum(serialize = "]")]
     BarackRight,
-    #[enum_from(str = "{")]
+    #[strum(serialize = "{")]
     BraceLeft,
-    #[enum_from(str = "}")]
+    #[strum(serialize = "}")]
     BraceRight,
 
-    #[enum_from(str = ",")]
+    #[strum(serialize = ",")]
     Comma,
-    #[enum_from(str = ":")]
+    #[strum(serialize = ":")]
     Colon,
-    #[enum_from(str = ".")]
+    #[strum(serialize = ".")]
     Period,
-    #[enum_from(str = ";")]
+    #[strum(serialize = ";")]
     SemiColon,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, EnumFrom)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, EnumString, IntoStaticStr)]
 pub enum Keyword {
-    #[enum_from(str = "break")]
+    #[strum(serialize = "break")]
     Break,
-    #[enum_from(str = "case")]
+    #[strum(serialize = "case")]
     Case,
-    #[enum_from(str = "chan")]
+    #[strum(serialize = "chan")]
     Chan,
-    #[enum_from(str = "const")]
+    #[strum(serialize = "const")]
     Const,
-    #[enum_from(str = "continue")]
+    #[strum(serialize = "continue")]
     Continue,
 
-    #[enum_from(str = "default")]
+    #[strum(serialize = "default")]
     Default,
-    #[enum_from(str = "defer")]
+    #[strum(serialize = "defer")]
     Defer,
-    #[enum_from(str = "else")]
+    #[strum(serialize = "else")]
     Else,
-    #[enum_from(str = "fallthrough")]
+    #[strum(serialize = "fallthrough")]
     FallThrough,
-    #[enum_from(str = "for")]
+    #[strum(serialize = "for")]
     For,
 
-    #[enum_from(str = "func")]
+    #[strum(serialize = "func")]
     Func,
-    #[enum_from(str = "go")]
+    #[strum(serialize = "go")]
     Go,
-    #[enum_from(str = "goto")]
+    #[strum(serialize = "goto")]
     Goto,
-    #[enum_from(str = "if")]
+    #[strum(serialize = "if")]
     If,
-    #[enum_from(str = "import")]
+    #[strum(serialize = "import")]
     Import,
 
-    #[enum_from(str = "interface")]
+    #[strum(serialize = "interface")]
     Interface,
-    #[enum_from(str = "map")]
+    #[strum(serialize = "map")]
     Map,
-    #[enum_from(str = "package")]
+    #[strum(serialize = "package")]
     Package,
-    #[enum_from(str = "range")]
+    #[strum(serialize = "range")]
     Range,
-    #[enum_from(str = "return")]
+    #[strum(serialize = "return")]
     Return,
 
-    #[enum_from(str = "select")]
+    #[strum(serialize = "select")]
     Select,
-    #[enum_from(str = "struct")]
+    #[strum(serialize = "struct")]
     Struct,
-    #[enum_from(str = "switch")]
+    #[strum(serialize = "switch")]
     Switch,
-    #[enum_from(str = "type")]
+    #[strum(serialize = "type")]
     Type,
-    #[enum_from(str = "var")]
+    #[strum(serialize = "var")]
     Var,
 }
 
@@ -177,14 +178,24 @@ pub enum LitKind {
     Char,
 }
 
-#[derive(Eq, PartialEq, Clone, EnumFrom)]
+#[derive(Eq, PartialEq, Clone)]
 pub enum Token {
     Comment(String),
-    #[enum_from(inner)]
     Keyword(Keyword),
-    #[enum_from(inner)]
     Operator(Operator),
     Literal(LitKind, String),
+}
+
+impl From<Keyword> for Token {
+    fn from(word: Keyword) -> Self {
+        Token::Keyword(word)
+    }
+}
+
+impl From<Operator> for Token {
+    fn from(op: Operator) -> Self {
+        Token::Operator(op)
+    }
 }
 
 impl Operator {
@@ -212,6 +223,18 @@ impl Operator {
             | Operator::AndNot => 5,
             _ => 0,
         }
+    }
+    
+    fn to_str(&self) -> &'static str {
+        let op_str: &'static str = self.into();
+        op_str
+    }
+}
+
+impl Keyword {
+    fn to_str(&self) -> &'static str {
+        let op_str: &'static str = self.into();
+        op_str
     }
 }
 
@@ -268,15 +291,30 @@ impl Token {
 
 pub(crate) trait IntoKind = Into<TokenKind> + Copy;
 
-#[derive(Eq, PartialEq, EnumFrom, Copy, Clone)]
+#[derive(Eq, PartialEq, Copy, Clone)]
 pub enum TokenKind {
     Comment,
-    #[enum_from(inner)]
     Keyword(Keyword),
-    #[enum_from(inner)]
     Literal(LitKind),
-    #[enum_from(inner)]
     Operator(Operator),
+}
+
+impl From<Keyword> for TokenKind {
+    fn from(word: Keyword) -> Self {
+        TokenKind::Keyword(word)
+    }
+}
+
+impl From<LitKind> for TokenKind {
+    fn from(lit: LitKind) -> Self {
+        TokenKind::Literal(lit)
+    }
+}
+
+impl From<Operator> for TokenKind {
+    fn from(op: Operator) -> Self {
+        TokenKind::Operator(op)
+    }
 }
 
 impl Debug for TokenKind {

@@ -1,7 +1,5 @@
-use crate::ast::{
-    AssignStmt, BasicLit, Comment, ConstSpec, Ellipsis, Expression, Field, FieldList, Ident,
-    StringLit, Type, TypeName, TypeSpec, VarSpec,
-};
+use crate::ast;
+use crate::ast::*;
 use crate::token::LitKind;
 use std::rc::Rc;
 
@@ -31,7 +29,7 @@ impl From<TypeName> for Field {
     fn from(id: TypeName) -> Self {
         Self {
             name: vec![],
-            typ: id.into(),
+            typ: ast::Expression::Ident(id),
             tag: None,
         }
     }
