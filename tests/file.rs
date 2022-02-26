@@ -18,7 +18,7 @@ fn resolve<P: AsRef<Path>>(path: P) -> PathBuf {
 
 fn parse_source<P: AsRef<Path>>(source: String, path: P) -> Result<Duration> {
     let clock = Instant::now();
-    Parser::from_str(source)
+    Parser::from(source)
         .parse_file()
         .map(|_| clock.elapsed())
         .map_err(|err| err.with_path(path))

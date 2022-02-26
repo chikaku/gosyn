@@ -54,7 +54,7 @@ impl Debug for Error {
                 let path = path.as_os_str().to_str().unwrap();
                 let file_line = format!("{}:{}:{}", path, line, offset);
                 let exp = match expect.len() {
-                    0 => format!("expected something"),
+                    0 => "expected something".to_string(),
                     1 => format!("expected {:?}", expect[0]),
                     _ => format!("expected {:?}", expect),
                 };

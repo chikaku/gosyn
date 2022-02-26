@@ -30,23 +30,27 @@ pub struct Parser {
 
 impl Parser {
     /// parse input source to `ast::File`, path will be \<input\>
-    pub fn from_str<S: AsRef<str>>(s: S) -> Self {
-        let mut parser = Self::default();
-        parser.path = PathBuf::from("<input>");
-        parser.scan = Scanner::new(s);
-        parser.next().expect("unexpected new Parser error");
+    pub fn from<S: AsRef<str>>(s: S) -> Self {
+        let mut parser = Parser {
+            scan: Scanner::new(s),
+            path: PathBuf::from("<input>"),
+            ..Default::default()
+        };
 
+        parser.next().expect("unexpected new Parser error");
         parser
     }
 
     /// read file content and parse to `ast::File`
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let source = fs::read_to_string(path.as_ref())?;
-        let mut parser = Parser::default();
-        parser.path = path.as_ref().into();
-        parser.scan = Scanner::new(source);
-        parser.next()?;
+        let mut parser = Parser {
+            scan: Scanner::new(source),
+            path: path.as_ref().into(),
+            ..Default::default()
+        };
 
+        parser.next()?;
         Ok(parser)
     }
 }
@@ -125,7 +129,7 @@ impl Parser {
         self.current
             .as_ref()
             .map(|(pos, _)| *pos)
-            .unwrap_or(self.scan.position())
+            .unwrap_or_else(|| self.scan.position())
     }
 
     fn get_current(&self) -> (usize, &Token) {
@@ -201,8 +205,10 @@ impl Parser {
     /// parse source into golang file
     /// including imports and `type`, `var`, `const` declarations
     pub fn parse_file(&mut self) -> Result<ast::File> {
-        let mut file = ast::File::default();
-        file.path = self.path.clone();
+        let mut file = ast::File {
+            path: self.path.clone(),
+            ..Default::default()
+        };
 
         file.docs = self.drain_comments();
         file.pkg_name = self.parse_package()?;
@@ -218,13 +224,11 @@ impl Parser {
         let decl_key = &[Keyword::Func, Keyword::Var, Keyword::Type, Keyword::Const];
         // match declaration keyword
         while let Some((_, tok)) = &self.current {
-            file.decl.push(match tok {
-                &token::FUNC => ast::Declaration::Function(self.parse_func_decl()?),
-                &token::VAR => ast::Declaration::Variable(self.parse_decl(Parser::parse_var_spec)?),
-                &token::TYPE => ast::Declaration::Type(self.parse_decl(Parser::parse_type_spec)?),
-                &token::CONST => {
-                    ast::Declaration::Const(self.parse_decl(Parser::parse_const_spec)?)
-                }
+            file.decl.push(match *tok {
+                token::FUNC => ast::Declaration::Function(self.parse_func_decl()?),
+                token::VAR => ast::Declaration::Variable(self.parse_decl(Parser::parse_var_spec)?),
+                token::TYPE => ast::Declaration::Type(self.parse_decl(Parser::parse_type_spec)?),
+                token::CONST => ast::Declaration::Const(self.parse_decl(Parser::parse_const_spec)?),
                 _ => {
                     let current = self.current.take();
                     return Err(self.unexpected(decl_key, current));
@@ -243,7 +247,7 @@ impl Parser {
         let ast::Ident { pos, name } = self.parse_ident()?;
         (name != "_")
             .then_some(ast::Ident { pos, name })
-            .ok_or(self.else_error_at(pos, "package name can't be blank"))
+            .ok_or_else(|| self.else_error_at(pos, "package name can't be blank"))
     }
 
     fn parse_import_decl(&mut self) -> Result<Vec<ast::Import>> {
@@ -274,22 +278,18 @@ impl Parser {
         self.next()?;
 
         let (name, path) = match tok {
-            Token::Literal(LitKind::Ident, name) => (
-                Some(ast::Ident { pos, name }),
-                self.parse_string_literal()?.into(),
-            ),
+            Token::Literal(LitKind::Ident, name) => {
+                (Some(ast::Ident { pos, name }), self.parse_string_literal()?)
+            }
             Token::Operator(Operator::Period) => {
                 let name = String::from(".");
-                (
-                    Some(ast::Ident { pos, name }),
-                    self.parse_string_literal()?.into(),
-                )
+                (Some(ast::Ident { pos, name }), self.parse_string_literal()?)
             }
             Token::Literal(LitKind::String, value) => {
                 self.next()?;
                 (None, ast::StringLit { pos, value })
             }
-            other @ _ => return Err(self.unexpected(exp_list, Some((pos, other)))),
+            other => return Err(self.unexpected(exp_list, Some((pos, other)))),
         };
 
         Ok(ast::Import { name, path })
@@ -304,9 +304,11 @@ impl Parser {
             .map_or(Ok(None), |x| x.map(Some))?;
 
         let name = self.parse_ident()?;
-        let mut typ = ast::FuncType::default();
-        typ.params = self.parse_params()?;
-        typ.result = self.parse_result()?;
+        let typ = ast::FuncType {
+            params: self.parse_params()?,
+            result: self.parse_result()?,
+            ..Default::default()
+        };
 
         let body = self
             .current_is(Operator::BraceLeft)
@@ -357,9 +359,12 @@ impl Parser {
     }
 
     fn parse_var_spec(&mut self, _: usize) -> Result<ast::VarSpec> {
-        let mut spec = ast::VarSpec::default();
-        spec.docs = self.drain_comments();
-        spec.name = self.parse_ident_list()?;
+        let mut spec = ast::VarSpec {
+            docs: self.drain_comments(),
+            name: self.parse_ident_list()?,
+            ..Default::default()
+        };
+
         match self.skipped(Operator::Assign)? {
             true => spec.values = self.parse_expr_list()?,
             false => {
@@ -379,9 +384,12 @@ impl Parser {
     }
 
     fn parse_const_spec(&mut self, index: usize) -> Result<ast::ConstSpec> {
-        let mut spec = ast::ConstSpec::default();
-        spec.docs = self.drain_comments();
-        spec.name = self.parse_ident_list()?;
+        let mut spec = ast::ConstSpec {
+            docs: self.drain_comments(),
+            name: self.parse_ident_list()?,
+            ..Default::default()
+        };
+
         match self.skipped(Operator::Assign)? {
             true => spec.values = self.parse_expr_list()?,
             false => {
@@ -424,7 +432,7 @@ impl Parser {
                 self.next()?;
                 let typ = self.parse_type()?;
                 self.expect(Operator::ParenRight)?;
-                return Ok(typ);
+                Ok(typ)
             }
             &token::LBARACK => {
                 self.next()?;
@@ -470,7 +478,7 @@ impl Parser {
                 let typ = Box::new(self.parse_type()?);
                 Ok(ast::Type::Pointer(ast::PointerType { pos, typ }))
             }
-            t @ _ => {
+            t => {
                 Err(self.else_error_at(pos, format!("expect a type representation found {:?}", t)))
             }
         }
@@ -502,12 +510,11 @@ impl Parser {
 
     #[inline]
     fn parse_func_type(&mut self) -> Result<ast::FuncType> {
-        let mut typ = ast::FuncType::default();
-        typ.pos = self.expect(Keyword::Func)?;
-        typ.params = self.parse_params()?;
-        typ.result = self.parse_result()?;
-
-        Ok(typ)
+        Ok(ast::FuncType {
+            pos: self.expect(Keyword::Func)?,
+            params: self.parse_params()?,
+            result: self.parse_result()?,
+        })
     }
 
     fn parse_struct_type(&mut self) -> Result<ast::StructType> {
@@ -583,15 +590,17 @@ impl Parser {
                 continue;
             }
 
-            let mut typ = ast::FuncType::default();
-            typ.params = self.parse_params()?;
-            typ.result = self.parse_result()?;
+            let typ = ast::Type::Function(ast::FuncType {
+                params: self.parse_params()?,
+                result: self.parse_result()?,
+                ..Default::default()
+            });
+
             self.skipped(Operator::SemiColon)?;
-            let typ = ast::Type::Function(typ);
             methods.list.push(ast::Field {
+                tag: None,
                 name: vec![id.name],
                 typ: ast::Expression::Type(typ),
-                tag: None,
             });
         }
 
@@ -665,8 +674,8 @@ impl Parser {
 
     fn parse_unary_expr(&mut self) -> Result<ast::Expression> {
         let (pos, tok) = self.get_current();
-        Ok(match tok {
-            &Token::Operator(
+        Ok(match *tok {
+            Token::Operator(
                 op
                 @ (Operator::Add | Operator::Sub | Operator::Not | Operator::Xor | Operator::And),
             ) => {
@@ -674,7 +683,7 @@ impl Parser {
                 let right = Box::new(self.parse_unary_expr()?);
                 ast::Expression::Unary(ast::UnaryExpression { pos, op, right })
             }
-            &token::ARROW => {
+            token::ARROW => {
                 self.next()?;
                 match self.parse_unary_expr()? {
                     // <- CHAN_TYPE => <-chan T
@@ -683,28 +692,24 @@ impl Parser {
                         ast::Expression::Type(ast::Type::Channel(chan_type))
                     }
                     // receive message
-                    expr @ _ => {
-                        let op = Operator::Arrow.into();
+                    expr => {
+                        let op = Operator::Arrow;
                         let right = Box::new(expr);
                         ast::Expression::Unary(ast::UnaryExpression { pos, op, right })
                     }
                 }
             }
-            &token::STAR => {
+            token::STAR => {
                 self.next()?;
                 let right = Box::new(self.parse_unary_expr()?);
                 ast::Expression::Star(ast::StarExpression { pos, right })
             }
-            _ => self.parse_primary_expr()?.into(),
+            _ => self.parse_primary_expr()?,
         })
     }
 
     /// reset the channel direction of expression `<- chan_typ`
-    fn reset_chan_arrow<'a>(
-        &mut self,
-        pos: usize,
-        mut typ: ChannelType,
-    ) -> Result<ast::ChannelType> {
+    fn reset_chan_arrow(&mut self, pos: usize, mut typ: ChannelType) -> Result<ast::ChannelType> {
         match typ.dir {
             Some(ast::ChanMode::Recv) => {
                 // <- <-chan T
@@ -722,7 +727,7 @@ impl Parser {
                     // <-chan <-chan T
                     ast::Type::Channel(chan_type) => {
                         let chan_type = self.reset_chan_arrow(typ.pos.1, chan_type)?;
-                        typ.typ = Box::new(ast::Type::Channel(chan_type).into());
+                        typ.typ = Box::new(ast::Type::Channel(chan_type));
                         typ.dir = Some(ast::ChanMode::Recv);
                         typ.pos = (typ.pos.0, pos);
                         Ok(typ)
@@ -780,8 +785,8 @@ impl Parser {
         let left = Box::new(left);
         let (pos, tok) = self.get_current();
 
-        match tok {
-            &token::PERIOD => {
+        match *tok {
+            token::PERIOD => {
                 let pos = self.expect(Operator::Period)?;
                 Ok((
                     match self.current_kind() {
@@ -806,7 +811,7 @@ impl Parser {
                     true,
                 ))
             }
-            &token::LBARACK => {
+            token::LBARACK => {
                 let (index, is_index) = self.parse_slice()?;
                 let pos1 = self.expect(Operator::BarackRight)?;
                 let pos = (pos, pos1);
@@ -822,7 +827,7 @@ impl Parser {
                     true,
                 ))
             }
-            &token::LPAREN => {
+            token::LPAREN => {
                 self.next()?;
                 let mut args = vec![];
                 while self.current_not(Operator::ParenRight) && self.current_not(Operator::Ellipsis)
@@ -840,7 +845,7 @@ impl Parser {
                     true,
                 ))
             }
-            &token::LBRACE => Ok(match self.check_brace(left.borrow()) {
+            token::LBRACE => Ok(match self.check_brace(left.borrow()) {
                 false => (*left, false),
                 true => {
                     let typ = left;
@@ -1067,11 +1072,7 @@ impl Parser {
                         // a, b func... | a, b struct...
                         _ => {
                             let typ = ast::Expression::Type(self.parse_type()?);
-                            Ok(vec![ast::Field {
-                                name: ident_list,
-                                typ: typ,
-                                tag: None,
-                            }])
+                            Ok(vec![ast::Field { typ, name: ident_list, tag: None }])
                         }
                     };
                 }
@@ -1095,21 +1096,22 @@ impl Parser {
     }
 
     fn check_field_list(&self, f: ast::FieldList, trailing: bool) -> Result<ast::FieldList> {
-        if f.list.len() == 0 {
+        if f.list.is_empty() {
             return Ok(f);
         }
 
-        let named = f.list.first().unwrap().name.len() > 0;
+        let named = !f.list.first().unwrap().name.is_empty();
         for (index, field) in f.list.iter().enumerate() {
-            if (field.name.len() > 0) != named {
+            if !field.name.is_empty() != named {
                 return Err(self.else_error_at(f.pos(), "mixed named and unnamed parameters"));
             }
 
-            if matches!(field.typ, ast::Expression::Ellipsis(..)) {
-                if index != f.list.len() - 1 || !trailing {
-                    return Err(self
-                        .else_error_at(f.pos(), "can only use ... with final parameter in list"));
-                }
+            if matches!(field.typ, ast::Expression::Ellipsis(..))
+                && (index != f.list.len() - 1 || !trailing)
+            {
+                return Err(
+                    self.else_error_at(f.pos(), "can only use ... with final parameter in list")
+                );
             }
         }
 
@@ -1222,8 +1224,8 @@ impl Parser {
             }
             _ => {
                 let expr = self.check_single_expr(left)?;
-                match self.get_current().1 {
-                    &token::COLON => match expr {
+                match *self.get_current().1 {
+                    token::COLON => match expr {
                         ast::Expression::Ident(id) if id.pkg.is_none() => {
                             self.next()?;
                             let name = id.name;
@@ -1232,12 +1234,12 @@ impl Parser {
                         }
                         _ => return Err(self.else_error_at(pos, "illegal label declaration")),
                     },
-                    &token::ARROW => {
+                    token::ARROW => {
                         self.next()?;
                         let value = self.parse_expr()?;
                         ast::Statement::Send(ast::SendStmt { pos, chan: expr, value })
                     }
-                    &Token::Operator(op @ (Operator::Inc | Operator::Dec)) => {
+                    Token::Operator(op @ (Operator::Inc | Operator::Dec)) => {
                         self.next()?;
                         ast::Statement::IncDec(ast::IncDecStmt { pos, expr, op })
                     }
@@ -1249,7 +1251,7 @@ impl Parser {
 
     fn check_single_expr(&mut self, mut list: Vec<ast::Expression>) -> Result<ast::Expression> {
         if let Some(expr) = list.pop() {
-            if list.len() == 0 {
+            if list.is_empty() {
                 return Ok(expr);
             }
         }
@@ -1257,7 +1259,7 @@ impl Parser {
         Err(self.else_error_at(
             list.first()
                 .map(|expr| expr.pos())
-                .unwrap_or(self.current_pos()),
+                .unwrap_or_else(|| self.current_pos()),
             "expect single expression",
         ))
     }
@@ -1633,7 +1635,7 @@ impl Parser {
                         body,
                     }));
                 }
-                stmt @ _ => Some(Box::new(stmt)),
+                stmt => Some(Box::new(stmt)),
             };
         };
 
@@ -1674,7 +1676,7 @@ mod test {
 
     #[test]
     fn parse_package() -> Result<()> {
-        let pkg = |s| Parser::from_str(s).parse_package();
+        let pkg = |s| Parser::from(s).parse_package();
 
         pkg("package main")?;
         pkg("package\n\nmain")?;
@@ -1689,7 +1691,7 @@ mod test {
 
     #[test]
     fn parse_imports() -> Result<()> {
-        let import = |s: &str| Parser::from_str(s).parse_import_decl();
+        let import = |s: &str| Parser::from(s).parse_import_decl();
 
         import("import ()")?;
         import("import `aa`")?;
@@ -1708,7 +1710,7 @@ mod test {
 
     #[test]
     fn parse_type() -> Result<()> {
-        let type_of = |x| Parser::from_str(x).parse_type();
+        let type_of = |x| Parser::from(x).parse_type();
 
         assert!(matches!(type_of("int")?, Type::Ident(_)));
         assert!(matches!(type_of("int")?, Type::Ident(_)));
@@ -1735,7 +1737,7 @@ mod test {
 
     #[test]
     fn parse_decl() -> Result<()> {
-        let vars = |s| Parser::from_str(s).parse_decl(Parser::parse_var_spec);
+        let vars = |s| Parser::from(s).parse_decl(Parser::parse_var_spec);
 
         vars("var a int")?;
         vars("var a = 1")?;
@@ -1748,7 +1750,7 @@ mod test {
 
         assert!(vars("var a, b;").is_err());
 
-        let consts = |s| Parser::from_str(s).parse_decl(Parser::parse_const_spec);
+        let consts = |s| Parser::from(s).parse_decl(Parser::parse_const_spec);
 
         consts("const a = 1")?;
         consts("const a int64 = 1")?;
@@ -1763,7 +1765,7 @@ mod test {
 
     #[test]
     fn parse_func_decl() -> Result<()> {
-        let func = |s| Parser::from_str(s).parse_func_decl();
+        let func = |s| Parser::from(s).parse_func_decl();
 
         func("func f() { go f1() }")?;
         func("func (m *M) Print() { fmt.Print(m.message)}")?;
@@ -1774,7 +1776,7 @@ mod test {
 
     #[test]
     fn parse_param_and_result() -> Result<()> {
-        let params = |s| Parser::from_str(s).parse_params();
+        let params = |s| Parser::from(s).parse_params();
 
         params("()")?;
         params("(bool)")?;
@@ -1799,7 +1801,7 @@ mod test {
         assert!(params("(...int, ...bool)").is_err());
         assert!(params("(a, b, c, d ...int)").is_err());
 
-        let ret_params = |s| Parser::from_str(s).parse_result();
+        let ret_params = |s| Parser::from(s).parse_result();
 
         ret_params("(int)")?;
         ret_params("(a int)")?;
@@ -1815,7 +1817,7 @@ mod test {
 
     #[test]
     fn parse_expr() -> Result<()> {
-        let expr = |s| Parser::from_str(s).parse_expr();
+        let expr = |s| Parser::from(s).parse_expr();
 
         expr("a + b")?;
         expr("a % b")?;
@@ -1845,7 +1847,7 @@ mod test {
 
     #[test]
     fn parse_operand() -> Result<()> {
-        let operand = |s| Parser::from_str(s).parse_operand();
+        let operand = |s| Parser::from(s).parse_operand();
 
         operand("a.b")?;
         operand("`Hola`")?;
@@ -1862,7 +1864,7 @@ mod test {
 
     #[test]
     fn parse_slice_index() -> Result<()> {
-        let slice = |s| Parser::from_str(s).parse_slice();
+        let slice = |s| Parser::from(s).parse_slice();
 
         slice("[a]")?;
         slice("[:]")?;
@@ -1882,7 +1884,7 @@ mod test {
 
     #[test]
     fn parse_interface_type() -> Result<()> {
-        let interface = |s| Parser::from_str(s).parse_interface_type();
+        let interface = |s| Parser::from(s).parse_interface_type();
 
         interface("interface{}")?;
         interface("interface{Close() error}")?;
@@ -1898,7 +1900,7 @@ mod test {
 
     #[test]
     fn parse_struct_type() -> Result<()> {
-        let struct_ = |s| Parser::from_str(s).parse_struct_type();
+        let struct_ = |s| Parser::from(s).parse_struct_type();
 
         struct_("struct {}")?;
         struct_("struct {T1}")?;
@@ -1926,7 +1928,7 @@ mod test {
 
     #[test]
     fn parse_func_type() -> Result<()> {
-        let func = |s| Parser::from_str(s).parse_func_type();
+        let func = |s| Parser::from(s).parse_func_type();
 
         func("func()")?;
         func("func(x int) int")?;
@@ -1947,7 +1949,7 @@ mod test {
 
     #[test]
     fn parse_stmt() -> Result<()> {
-        let stmt = |s| Parser::from_str(s).parse_stmt();
+        let stmt = |s| Parser::from(s).parse_stmt();
 
         stmt("a <- b{c: c, d: d}")?;
         stmt("if err != nil { return }")?;
@@ -1961,7 +1963,7 @@ mod test {
 
     #[test]
     fn parse_assign_stmt() -> Result<()> {
-        let assign = |s| Parser::from_str(s).parse_simple_stmt();
+        let assign = |s| Parser::from(s).parse_simple_stmt();
 
         assign("x = 1")?;
         assign("*p = f()")?;
@@ -1981,7 +1983,7 @@ mod test {
 
     #[test]
     fn parse_for_stmt() -> Result<()> {
-        let stmt = |s| Parser::from_str(s).parse_for_stmt();
+        let stmt = |s| Parser::from(s).parse_for_stmt();
 
         stmt("for range ch {};")?;
         stmt("for x := range ch {};")?;
@@ -1998,7 +2000,7 @@ mod test {
 
     #[test]
     fn parse_select_stmt() -> Result<()> {
-        let select = |s| Parser::from_str(s).parse_select_stmt();
+        let select = |s| Parser::from(s).parse_select_stmt();
 
         select(
             "select {
@@ -2015,7 +2017,7 @@ mod test {
 
     #[test]
     fn parse_switch_stmt() -> Result<()> {
-        let switch = |s| Parser::from_str(s).parse_switch_stmt();
+        let switch = |s| Parser::from(s).parse_switch_stmt();
 
         switch("switch x {}")?;
         switch("switch x;x.(type) {}")?;
@@ -2047,7 +2049,7 @@ mod test {
 
     #[test]
     fn parse_if_stmt() -> Result<()> {
-        let stmt = |s| Parser::from_str(s).parse_if_stmt();
+        let stmt = |s| Parser::from(s).parse_if_stmt();
 
         stmt("if a > 0 {};")?;
         stmt("if true {{}};")?;
@@ -2064,7 +2066,7 @@ mod test {
 
     #[test]
     fn parse_docs() -> Result<()> {
-        static CODE: &'static str = "
+        static CODE: &str = "
         // comments...
 
         // docs for file
@@ -2090,7 +2092,7 @@ mod test {
         func main() {}
         ";
 
-        let mut ast = Parser::from_str(CODE).parse_file()?;
+        let mut ast = Parser::from(CODE).parse_file()?;
 
         assert_eq!(ast.docs.len(), 1);
         while let Some(decl) = ast.decl.pop() {

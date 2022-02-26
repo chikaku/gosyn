@@ -26,9 +26,10 @@ pub struct Scanner {
 
 impl Scanner {
     pub fn new<S: AsRef<str>>(source: S) -> Self {
-        let mut scan = Self::default();
-        scan.source = source.as_ref().into();
-        scan
+        Scanner {
+            source: source.as_ref().into(),
+            ..Default::default()
+        }
     }
 
     pub fn position(&self) -> usize {
@@ -65,7 +66,7 @@ impl Scanner {
 
     fn next_char(&mut self, skp: usize) -> Option<char> {
         let source = &self.source[self.index..];
-        source.chars().skip(skp).next().to_owned()
+        source.chars().nth(skp).to_owned()
     }
 
     fn next_nchar(&mut self, n: usize) -> String {
@@ -133,13 +134,11 @@ impl Scanner {
     }
 
     pub fn next_token(&mut self) -> Result<Option<PosTok>> {
-        if self.semicolon {
-            if self.line_ended() {
-                let pos = self.pos;
-                let tok = Token::Operator(Operator::SemiColon);
-                self.semicolon = false;
-                return Ok(Some((pos, tok)));
-            }
+        if self.semicolon && self.line_ended() {
+            let pos = self.pos;
+            let tok = Token::Operator(Operator::SemiColon);
+            self.semicolon = false;
+            return Ok(Some((pos, tok)));
         }
 
         self.semicolon = false;
@@ -150,7 +149,7 @@ impl Scanner {
                 let current = self.pos;
                 let tok = self.scan_token()?;
                 self.add_token_cross_line(&tok);
-                self.index += tok.len();
+                self.index += tok.str_len();
                 self.pos += tok.char_count();
                 self.semicolon = self.try_insert_semicolon2(&tok);
                 Some((current, tok))
@@ -173,7 +172,7 @@ impl Scanner {
 
     /// return next Token
     pub fn scan_token(&mut self) -> Result<Token> {
-        if let Some(op) = Operator::from_str(&self.next_nchar(3)).ok() {
+        if let Ok(op) = Operator::from_str(&self.next_nchar(3)) {
             return Ok(op.into());
         }
 
@@ -298,7 +297,7 @@ impl Scanner {
                     .expect("here must be a valid u32"),
             )
         })
-        .ok_or(self.error("invalid Unicode code point"))?;
+        .ok_or_else(|| self.error("invalid Unicode code point"))?;
 
         Ok(es_sequence.iter().collect())
     }
@@ -324,7 +323,7 @@ impl Scanner {
         result.push(quote);
 
         if quote == '`' {
-            while let Some(ch) = chars.next() {
+            for ch in chars.by_ref() {
                 result.push(ch);
                 if ch == quote {
                     break;
@@ -366,7 +365,7 @@ impl Scanner {
 
     fn scan_lit_number(&mut self) -> Result<Token> {
         let chars = self.source[self.index..].chars();
-        let next2 = chars.take(2).collect::<String>().to_owned();
+        let next2 = chars.take(2).collect::<String>();
 
         // integer part
         let (radix, int_part) = self
@@ -382,7 +381,7 @@ impl Scanner {
             })
             .unwrap_or((10, String::new()));
 
-        if int_part.ends_with("_") {
+        if int_part.ends_with('_') {
             return Err(self.error_at(
                 self.pos + int_part.len(),
                 "'_' must separate successive digits",
@@ -398,7 +397,7 @@ impl Scanner {
             })
             .unwrap_or(Ok(String::new()))?;
 
-        if fac_part.starts_with("._") || fac_part.ends_with("_") {
+        if fac_part.starts_with("._") || fac_part.ends_with('_') {
             return Err(self.error_at(self.pos + skipped, "'_' must separate successive digits"));
         }
 
@@ -441,9 +440,9 @@ impl Scanner {
                     )
                 })
             })
-            .unwrap_or(String::new());
+            .unwrap_or_default();
 
-        if radix == 16 && fac_part.len() > 0 && exp_part.len() == 0 {
+        if radix == 16 && !fac_part.is_empty() && exp_part.is_empty() {
             return Err(self.error_at(
                 self.pos + skipped + exp_part.len(),
                 "mantissa has no digits",
@@ -453,10 +452,9 @@ impl Scanner {
         if exp_part
             .chars()
             .skip(1) // skip e|E|p|P
-            .skip_while(|&ch| ch == '+' || ch == '-')
-            .next()
+            .find(|&ch| ch != '+' && ch != '-')
             == Some('_')
-            || exp_part.ends_with("_")
+            || exp_part.ends_with('_')
         {
             return Err(self.error_at(
                 self.pos + skipped + exp_part.len(),
@@ -529,12 +527,12 @@ mod tests {
     fn line_ended() {
         let ended = |s| Scanner::new(s).line_ended();
 
-        assert_eq!(ended("1"), false);
-        assert_eq!(ended("//"), true);
-        assert_eq!(ended("/**/"), true);
-        assert_eq!(ended("/**/123"), false);
-        assert_eq!(ended("/*\n*/"), true);
-        assert_eq!(ended("/**/ //"), true);
+        assert!(!ended("1"));
+        assert!(!ended("/**/123"));
+        assert!(ended("//"));
+        assert!(ended("/**/"));
+        assert!(ended("/*\n*/"));
+        assert!(ended("/**/ //"));
     }
 
     #[test]
@@ -703,8 +701,11 @@ mod tests {
 
     #[test]
     fn get_line_info() {
-        let mut scanner = Scanner::default();
-        scanner.lines = vec![10, 20, 30];
+        let scanner = Scanner {
+            lines: vec![10, 20, 30],
+            ..Default::default()
+        };
+
         assert_eq!(scanner.line_info(5), (1, 5));
         assert_eq!(scanner.line_info(20), (2, 0));
         assert_eq!(scanner.line_info(50), (3, 20));

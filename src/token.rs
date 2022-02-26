@@ -225,16 +225,14 @@ impl Operator {
         }
     }
     
-    fn to_str(&self) -> &'static str {
-        let op_str: &'static str = self.into();
-        op_str
+    fn to_str(self) -> &'static str {
+        self.into()
     }
 }
 
 impl Keyword {
-    fn to_str(&self) -> &'static str {
-        let op_str: &'static str = self.into();
-        op_str
+    fn to_str(self) -> &'static str {
+        self.into()
     }
 }
 
@@ -250,7 +248,7 @@ impl Debug for Token {
 }
 
 impl Token {
-    pub fn len(&self) -> usize {
+    pub fn str_len(&self) -> usize {
         match self {
             Token::Operator(op) => op.to_str().len(),
             Token::Keyword(word) => word.to_str().len(),
@@ -271,9 +269,9 @@ impl Token {
     pub fn kind(&self) -> TokenKind {
         match self {
             Token::Comment(_) => TokenKind::Comment,
-            Token::Operator(op) => TokenKind::Operator(op.clone()),
-            Token::Keyword(word) => TokenKind::Keyword(word.clone()),
-            Token::Literal(kind, _) => TokenKind::Literal(kind.clone()),
+            Token::Operator(op) => TokenKind::Operator(*op),
+            Token::Keyword(word) => TokenKind::Keyword(*word),
+            Token::Literal(kind, _) => TokenKind::Literal(*kind),
         }
     }
 

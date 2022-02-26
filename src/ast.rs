@@ -405,6 +405,7 @@ pub struct EmptyStmt {
     pub pos: usize,
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum Statement {
     Go(GoStmt),
     If(IfStmt),

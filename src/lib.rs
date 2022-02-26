@@ -28,7 +28,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 
 /// parse source code to `ast::File`
 pub fn parse_source<S: AsRef<str>>(source: S) -> Result<ast::File> {
-    parser::Parser::from_str(source).parse_file()
+    parser::Parser::from(source).parse_file()
 }
 
 /// parse source code from given path to  `ast::File`
