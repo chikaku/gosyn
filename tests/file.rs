@@ -1,5 +1,6 @@
 mod walkdir;
 
+use gosyn::parse_dir;
 use gosyn::Parser;
 use gosyn::Result;
 use pprof::protos::Message;
@@ -76,6 +77,23 @@ fn test_third_party_projects() -> Result<()> {
             path.as_path().strip_prefix(&root).unwrap().display(),
             parse_source(fs::read_to_string(&path)?, &path)?.as_micros(),
         );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_parse_directory() -> Result<()> {
+    let root = match env::var("SHIKA_PARSER_TEST") {
+        Ok(dir) => PathBuf::from(dir),
+        _ => return Ok(()),
+    };
+
+    for (name, pkg) in parse_dir(root)? {
+        println!("package {}:", name);
+        for (path, _) in pkg.files {
+            println!("  {}", path.as_os_str().to_str().unwrap());
+        }
     }
 
     Ok(())

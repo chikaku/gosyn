@@ -1,16 +1,13 @@
 use crate::ast;
-use crate::ast::ChanMode;
-use crate::ast::{BasicLit, ChannelType};
-use crate::ast_impl::Spec;
+use crate::ast::{BasicLit, ChanMode, ChannelType, Spec};
 use crate::scanner::Scanner;
 use crate::token;
-use crate::token::IntoKind;
-use crate::token::TokenKind;
-use crate::token::{Keyword, LitKind, Operator, Token};
+use crate::token::{IntoKind, Keyword, LitKind, Operator, Token, TokenKind};
 use crate::Error;
 use crate::Pos;
 use crate::PosTok;
 use crate::Result;
+
 use std::borrow::Borrow;
 use std::fs;
 use std::path::{Path, PathBuf};
