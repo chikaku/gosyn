@@ -129,6 +129,15 @@ impl Parser {
             .unwrap_or_else(|| self.scan.position())
     }
 
+    fn preback(&self) -> ((usize, usize), Option<PosTok>) {
+        (self.scan.preback(), self.current.clone())
+    }
+
+    fn goback(&mut self, pre: ((usize, usize), Option<PosTok>)) {
+        self.scan.goback(pre.0);
+        self.current = pre.1;
+    }
+
     fn get_current(&self) -> (usize, &Token) {
         self.current
             .as_ref()
@@ -574,35 +583,98 @@ impl Parser {
         Ok(ast::StructType { fields, pos: (pos1, pos2) })
     }
 
+    // InterfaceType  = "interface" "{" { InterfaceElem ";" } "}" .
+    // InterfaceElem  = MethodElem | TypeElem .
     fn parse_interface_type(&mut self) -> Result<ast::Type> {
-        let mut methods = ast::FieldList::default();
         let pos = self.expect(Keyword::Interface)?;
         let pos1 = self.expect(Operator::BraceLeft)?;
+
+        let mut methods = ast::FieldList::default();
         while !self.current_is(Operator::BraceRight) {
-            let id = self.parse_type_name()?;
-            if id.pkg.is_some() || !self.current_is(Operator::ParenLeft) {
-                // nested interface name
-                methods.list.push(id.into());
-                self.skipped(Operator::SemiColon)?;
-                continue;
+            let start = self.preback();
+            if self.current_is(LitKind::Ident) {
+                // try parse method name first
+                if let Ok(field) = self.parse_method_elem() {
+                    methods.list.push(field);
+                    continue;
+                }
             }
 
-            let typ = ast::Type::Function(ast::FuncType {
-                params: self.parse_params()?,
-                result: self.parse_result()?,
-                ..Default::default()
-            });
-
-            self.skipped(Operator::SemiColon)?;
-            methods.list.push(ast::Field {
-                tag: None,
-                name: vec![id.name],
-                typ: ast::Expression::Type(typ),
-            });
+            self.goback(start);
+            methods.list.push(self.parse_type_elem()?);
+            if !self.current_is(Operator::BraceRight) {
+                self.expect(Operator::SemiColon)?;
+            }
         }
 
         methods.pos = Some((pos1, self.expect(Operator::BraceRight)?));
         Ok(ast::Type::Interface(ast::InterfaceType { pos, methods }))
+    }
+
+    // MethodElem  = MethodName Signature .
+    // MethodName  = identifier .
+    fn parse_method_elem(&mut self) -> Result<ast::Field> {
+        let id = self.parse_type_name()?;
+        if id.pkg.is_some() || !self.current_is(Operator::ParenLeft) {
+            if !self.current_is(Operator::BraceRight) {
+                self.expect(Operator::SemiColon)?;
+            }
+
+            return Ok(id.into());
+        }
+
+        let typ = ast::Type::Function(ast::FuncType {
+            params: self.parse_params()?,
+            result: self.parse_result()?,
+            ..Default::default()
+        });
+
+        if !self.current_is(Operator::BraceRight) {
+            self.expect(Operator::SemiColon)?;
+        }
+
+        Ok(ast::Field {
+            tag: None,
+            name: vec![id.name],
+            typ: ast::Expression::Type(typ),
+        })
+    }
+
+    // TypeElem       = TypeTerm { "|" TypeTerm } .
+    // TypeTerm       = Type | UnderlyingType .
+    // UnderlyingType = "~" Type .
+    fn parse_type_elem(&mut self) -> Result<ast::Field> {
+        let mut term = self.parse_type_term()?;
+        while self.current_is(Operator::Or) {
+            let pos = self.expect(Operator::Or)?;
+            let right = self.parse_type_term()?;
+            term = ast::Expression::Binary(ast::BinaryExpression {
+                pos,
+                op: Operator::Or,
+                left: Box::new(term),
+                right: Box::new(right),
+            })
+        }
+
+        Ok(ast::Field {
+            name: vec![],
+            typ: term,
+            tag: None,
+        })
+    }
+
+    fn parse_type_term(&mut self) -> Result<ast::Expression> {
+        let pos = self.current_pos();
+        let under_type = self.skipped(Operator::Tiled)?;
+        let typ = self.parse_type()?;
+        Ok(match under_type {
+            false => ast::Expression::Type(typ),
+            true => ast::Expression::Unary(ast::UnaryExpression {
+                pos,
+                op: Operator::Tiled,
+                right: Box::new(ast::Expression::Type(typ)),
+            }),
+        })
     }
 
     #[inline]
@@ -1890,7 +1962,35 @@ mod test {
         interface("interface {os.FileInfo; String() string}")?;
         interface("interface {Publish(string, []byte) error}")?;
 
+        interface("interface {~int}")?;
+        interface("interface{ chan int | chan<- string }")?;
+        interface("interface{ <-chan int | chan<- int }")?;
+        interface("interface {~int; String() string}")?;
+        interface("interface {~int | ~string | Bad3}")?;
+
+        interface(
+            "
+            interface {
+                ~[]byte  // the underlying type of []byte is itself
+                ~MyInt   // illegal: the underlying type of MyInt is not MyInt
+                ~error   // illegal: error is an interface
+            }
+        ",
+        )?;
+
+        interface("
+            interface {
+                P                // illegal: P is a type parameter
+                int | ~P         // illegal: P is a type parameter
+                ~int | MyInt     // illegal: the type sets for ~int and MyInt are not disjoint (~int includes MyInt)
+                float32 | Float  // overlapping type sets but Float is an interface
+            }
+        ")?;
+
+        assert!(interface("interface {a b}").is_err());
         assert!(interface("interface {a, b;}").is_err());
+        assert!(interface("interface {a | b c}").is_err());
+        assert!(interface("interface {a b | c}").is_err());
 
         Ok(())
     }

@@ -108,6 +108,9 @@ pub enum Operator {
     Period,
     #[strum(serialize = ";")]
     SemiColon,
+
+    #[strum(serialize = "~")]
+    Tiled
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, EnumString, IntoStaticStr)]

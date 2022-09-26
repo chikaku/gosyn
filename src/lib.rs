@@ -1,9 +1,5 @@
-#![feature(exclusive_range_pattern)]
-#![feature(assert_matches)]
-#![feature(bool_to_option)]
 #![feature(trait_alias)]
 #![feature(custom_inner_attributes)]
-#![feature(stmt_expr_attributes)]
 
 use std::collections::HashMap;
 use std::ffi::OsStr;

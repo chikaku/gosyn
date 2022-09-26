@@ -37,6 +37,15 @@ impl Scanner {
         self.pos
     }
 
+    pub fn preback(&self) -> (usize, usize) {
+        (self.pos, self.index)
+    }
+
+    pub fn goback(&mut self, pre: (usize, usize)) {
+        self.pos = pre.0;
+        self.index = pre.1;
+    }
+
     pub fn line_info(&self, pos: usize) -> (usize, usize) {
         self.lines
             .iter()
