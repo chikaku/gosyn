@@ -28,24 +28,24 @@ pub struct TypeName {
 
 pub struct PointerType {
     pub pos: usize,
-    pub typ: Box<Type>,
+    pub typ: Box<Expression>,
 }
 
 pub struct ArrayType {
     pub pos: (usize, usize),
     pub len: Box<Expression>,
-    pub typ: Box<Type>,
+    pub typ: Box<Expression>,
 }
 
 pub struct SliceType {
     pub pos: (usize, usize),
-    pub typ: Box<Type>,
+    pub typ: Box<Expression>,
 }
 
 pub struct MapType {
     pub pos: (usize, usize),
-    pub key: Box<Type>,
-    pub val: Box<Type>,
+    pub key: Box<Expression>,
+    pub val: Box<Expression>,
 }
 
 pub struct Field {
@@ -68,6 +68,7 @@ pub struct StructType {
 #[derive(Default)]
 pub struct FuncType {
     pub pos: usize,
+    pub typ_params: FieldList,
     pub params: FieldList,
     pub result: FieldList,
 }
@@ -81,7 +82,7 @@ pub enum ChanMode {
 pub struct ChannelType {
     pub pos: (usize, usize), // chan, <-
     pub dir: Option<ChanMode>,
-    pub typ: Box<Type>,
+    pub typ: Box<Expression>,
 }
 
 pub struct InterfaceType {
@@ -149,7 +150,7 @@ pub struct Selector {
 pub struct TypeAssertion {
     pub pos: (usize, usize),
     pub left: Box<Expression>,
-    pub right: Option<Type>, // None for x.(type)
+    pub right: Option<Box<Expression>>, // None for x.(type)
 }
 
 pub struct Index {
@@ -196,7 +197,7 @@ pub struct StarExpression {
 
 pub struct Ellipsis {
     pub pos: usize,
-    pub elt: Option<Type>,
+    pub elt: Option<Box<Expression>>,
 }
 
 pub struct RangeExpr {
@@ -205,7 +206,7 @@ pub struct RangeExpr {
 }
 
 pub enum Expression {
-    Type(Type),
+    Type(Type), // FIXME: ugly design
     Call(Call),
     Index(Index),
     Slice(Slice),
@@ -221,6 +222,7 @@ pub enum Expression {
     Binary(BinaryExpression),
     TypeAssert(TypeAssertion),
     CompositeLit(CompositeLit),
+    List(Vec<Expression>),
 }
 
 // ================ Declaration Definition ================
@@ -236,7 +238,7 @@ pub struct Decl<T> {
 pub struct VarSpec {
     pub docs: Vec<Rc<Comment>>,
     pub name: Vec<Ident>,
-    pub typ: Option<Type>,
+    pub typ: Option<Expression>,
     pub values: Vec<Expression>,
 }
 
@@ -244,7 +246,7 @@ pub struct VarSpec {
 pub struct ConstSpec {
     pub docs: Vec<Rc<Comment>>,
     pub name: Vec<Ident>,
-    pub typ: Option<Type>,
+    pub typ: Option<Expression>,
     pub values: Vec<Expression>,
 }
 
@@ -252,7 +254,8 @@ pub struct TypeSpec {
     pub docs: Vec<Rc<Comment>>,
     pub alias: bool,
     pub name: Ident,
-    pub typ: Type,
+    pub params: FieldList,
+    pub typ: Expression,
 }
 
 pub struct FuncDecl {
@@ -484,16 +487,6 @@ impl From<TypeName> for Field {
     }
 }
 
-impl From<Type> for Field {
-    fn from(typ: Type) -> Self {
-        Self {
-            name: vec![],
-            typ: Expression::Type(typ),
-            tag: None,
-        }
-    }
-}
-
 impl From<BasicLit> for StringLit {
     fn from(lit: BasicLit) -> StringLit {
         assert_eq!(lit.kind, LitKind::String);
@@ -567,6 +560,7 @@ impl Expression {
             Expression::Binary(x) => x.left.pos(),
             Expression::TypeAssert(x) => x.left.pos(),
             Expression::CompositeLit(x) => x.typ.pos(),
+            Expression::List(_) => unimplemented!(), // FIXME: if list is empty then we have no position
         }
     }
 }
