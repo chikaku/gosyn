@@ -64,7 +64,6 @@ fn test_exception_file() -> Result<()> {
 
 #[test]
 fn test_third_party_projects() -> Result<()> {
-    env::set_var("SHIKA_PARSER_TEST", "/usr/local/go/src/");
     let root = match env::var("SHIKA_PARSER_TEST") {
         Ok(dir) => PathBuf::from(dir),
         _ => return Ok(()),
