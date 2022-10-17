@@ -159,6 +159,12 @@ pub struct Index {
     pub index: Box<Expression>,
 }
 
+pub struct IndexList {
+    pub pos: (usize, usize),
+    pub left: Box<Expression>,
+    pub indices: Vec<Expression>,
+}
+
 pub struct Slice {
     pub pos: (usize, usize),
     pub left: Box<Expression>,
@@ -209,6 +215,7 @@ pub enum Expression {
     Type(Type), // FIXME: ugly design
     Call(Call),
     Index(Index),
+    IndexList(IndexList),
     Slice(Slice),
     Ident(TypeName),
     FuncLit(FuncLit),
@@ -560,6 +567,7 @@ impl Expression {
             Expression::Binary(x) => x.left.pos(),
             Expression::TypeAssert(x) => x.left.pos(),
             Expression::CompositeLit(x) => x.typ.pos(),
+            Expression::IndexList(x) => x.left.pos(),
             Expression::List(_) => unimplemented!(), // FIXME: if list is empty then we have no position
         }
     }

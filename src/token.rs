@@ -110,7 +110,7 @@ pub enum Operator {
     SemiColon,
 
     #[strum(serialize = "~")]
-    Tiled
+    Tiled,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, EnumString, IntoStaticStr)]
@@ -339,6 +339,7 @@ impl Debug for TokenKind {
 /// alias to some often used token
 pub(crate) const STAR: Token = Token::Operator(Operator::Star);
 pub(crate) const COLON: Token = Token::Operator(Operator::Colon);
+pub(crate) const COMMA: Token = Token::Operator(Operator::Comma);
 pub(crate) const ARROW: Token = Token::Operator(Operator::Arrow);
 pub(crate) const PERIOD: Token = Token::Operator(Operator::Period);
 pub(crate) const LPAREN: Token = Token::Operator(Operator::ParenLeft);

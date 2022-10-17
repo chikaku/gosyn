@@ -64,7 +64,7 @@ fn test_exception_file() -> Result<()> {
 
 #[test]
 fn test_third_party_projects() -> Result<()> {
-    let root = match env::var("SHIKA_PARSER_TEST") {
+    let root = match env::var("GOSYN_THIRD_PARTY") {
         Ok(dir) => PathBuf::from(dir),
         _ => return Ok(()),
     };
@@ -84,7 +84,7 @@ fn test_third_party_projects() -> Result<()> {
 
 #[test]
 fn test_parse_directory() -> Result<()> {
-    let root = match env::var("SHIKA_PARSER_TEST") {
+    let root = match env::var("GOSYN_TEST_DIR") {
         Ok(dir) => PathBuf::from(dir),
         _ => return Ok(()),
     };
