@@ -64,22 +64,24 @@ fn test_exception_file() -> Result<()> {
 
 #[test]
 fn test_third_party_projects() -> Result<()> {
-    let root = match env::var("GOSYN_THIRD_PARTY") {
-        Ok(dir) => PathBuf::from(dir),
+    match env::var("GOSYN_THIRD_PARTY") {
+        Ok(val) => val
+            .split(";")
+            .map(|dir| -> Result<()> {
+                let mut walk = Walkdir::new(dir)?.with_ext([".go"], [".pb.go"])?;
+                println!("parsing {} ...", dir);
+                while let Some(path) = walk.next()? {
+                    println!(
+                        "  {}: {}μs",
+                        path.as_path().strip_prefix(&dir).unwrap().display(),
+                        parse_source(fs::read_to_string(&path)?, &path)?.as_micros(),
+                    );
+                }
+                Ok(())
+            })
+            .collect(),
         _ => return Ok(()),
-    };
-
-    let path = root.as_path();
-    let mut walk = Walkdir::new(path)?.with_ext("go")?;
-    while let Some(path) = walk.next()? {
-        println!(
-            "{}: {}μs",
-            path.as_path().strip_prefix(&root).unwrap().display(),
-            parse_source(fs::read_to_string(&path)?, &path)?.as_micros(),
-        );
     }
-
-    Ok(())
 }
 
 #[test]
