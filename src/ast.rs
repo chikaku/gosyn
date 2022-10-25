@@ -511,6 +511,16 @@ impl From<Ellipsis> for Field {
     }
 }
 
+impl From<Expression> for Field {
+    fn from(expr: Expression) -> Self {
+        Self {
+            name: vec![],
+            typ: expr,
+            tag: None,
+        }
+    }
+}
+
 impl AssignStmt {
     pub fn is_range(&self) -> bool {
         matches!(self.right.first(), Some(Expression::Range(_)))

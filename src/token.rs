@@ -345,21 +345,4 @@ pub(crate) const PERIOD: Token = Token::Operator(Operator::Period);
 pub(crate) const LPAREN: Token = Token::Operator(Operator::ParenLeft);
 pub(crate) const LBARACK: Token = Token::Operator(Operator::BarackLeft);
 pub(crate) const LBRACE: Token = Token::Operator(Operator::BraceLeft);
-pub(crate) const RBRACE: Token = Token::Operator(Operator::BraceRight);
 pub(crate) const SEMICOLON: Token = Token::Operator(Operator::SemiColon);
-
-pub(crate) const IF: Token = Token::Keyword(Keyword::If);
-pub(crate) const VAR: Token = Token::Keyword(Keyword::Var);
-pub(crate) const MAP: Token = Token::Keyword(Keyword::Map);
-pub(crate) const CASE: Token = Token::Keyword(Keyword::Case);
-pub(crate) const TYPE: Token = Token::Keyword(Keyword::Type);
-pub(crate) const CHAN: Token = Token::Keyword(Keyword::Chan);
-pub(crate) const FUNC: Token = Token::Keyword(Keyword::Func);
-pub(crate) const CONST: Token = Token::Keyword(Keyword::Const);
-pub(crate) const STRUCT: Token = Token::Keyword(Keyword::Struct);
-pub(crate) const DEFAULT: Token = Token::Keyword(Keyword::Default);
-pub(crate) const INTERFACE: Token = Token::Keyword(Keyword::Interface);
-
-// alias to some often used token kind
-pub(crate) const KIND_IDENT: TokenKind = TokenKind::Literal(LitKind::Ident);
-pub(crate) const KIND_LPAREN: TokenKind = TokenKind::Operator(Operator::ParenLeft);
