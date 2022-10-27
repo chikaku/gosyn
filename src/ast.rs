@@ -118,7 +118,7 @@ pub struct StringLit {
 
 pub struct FuncLit {
     pub typ: FuncType,
-    pub body: Option<BlockStmt>,
+    pub body: Option<BlockStmt>, // FIXME: Why this have an option?
 }
 
 pub enum Element {
@@ -211,6 +211,13 @@ pub struct RangeExpr {
     pub right: Box<Expression>,
 }
 
+pub struct Operation {
+    pub pos: usize,
+    pub op: Operator,
+    pub x: Box<Expression>,
+    pub y: Option<Box<Expression>>,
+}
+
 pub enum Expression {
     Type(Type), // FIXME: ugly design
     Call(Call),
@@ -230,6 +237,7 @@ pub enum Expression {
     TypeAssert(TypeAssertion),
     CompositeLit(CompositeLit),
     List(Vec<Expression>),
+    Operation(Operation),
 }
 
 // ================ Declaration Definition ================
@@ -579,6 +587,7 @@ impl Expression {
             Expression::CompositeLit(x) => x.typ.pos(),
             Expression::IndexList(x) => x.left.pos(),
             Expression::List(_) => unimplemented!(), // FIXME: if list is empty then we have no position
+            Expression::Operation(_) => unimplemented!(), // TODO: position of binary expression and unary expression
         }
     }
 }

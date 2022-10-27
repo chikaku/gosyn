@@ -75,15 +75,17 @@ pub enum Operator {
     Assign,
     #[strum(serialize = "!")]
     Not,
+    #[strum(serialize = "~")]
+    Tiled,
 
-    #[strum(serialize = ":=")]
-    Define,
     #[strum(serialize = "!=")]
     NotEqual,
     #[strum(serialize = "<=")]
     LessEqual,
     #[strum(serialize = ">=")]
     GreaterEqual,
+    #[strum(serialize = ":=")]
+    Define,
     #[strum(serialize = "...")]
     Ellipsis,
 
@@ -105,12 +107,9 @@ pub enum Operator {
     #[strum(serialize = ":")]
     Colon,
     #[strum(serialize = ".")]
-    Period,
+    Dot,
     #[strum(serialize = ";")]
     SemiColon,
-
-    #[strum(serialize = "~")]
-    Tiled,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, EnumString, IntoStaticStr)]
@@ -187,6 +186,7 @@ pub enum Token {
     Keyword(Keyword),
     Operator(Operator),
     Literal(LitKind, String),
+    // TODO: split _Operator to delimiters
 }
 
 impl From<Keyword> for Token {
@@ -337,12 +337,7 @@ impl Debug for TokenKind {
 }
 
 /// alias to some often used token
-pub(crate) const STAR: Token = Token::Operator(Operator::Star);
 pub(crate) const COLON: Token = Token::Operator(Operator::Colon);
 pub(crate) const COMMA: Token = Token::Operator(Operator::Comma);
 pub(crate) const ARROW: Token = Token::Operator(Operator::Arrow);
-pub(crate) const PERIOD: Token = Token::Operator(Operator::Period);
-pub(crate) const LPAREN: Token = Token::Operator(Operator::ParenLeft);
-pub(crate) const LBARACK: Token = Token::Operator(Operator::BarackLeft);
 pub(crate) const LBRACE: Token = Token::Operator(Operator::BraceLeft);
-pub(crate) const SEMICOLON: Token = Token::Operator(Operator::SemiColon);
