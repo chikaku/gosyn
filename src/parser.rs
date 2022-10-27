@@ -390,49 +390,50 @@ impl Parser {
         ) -> (Option<ast::TypeName>, Option<ast::Expression>) {
             match expr {
                 ast::Expression::Ident(id) => (Some(id), None),
-                ast::Expression::Binary(mut bexp) => {
-                    if bexp.op == Operator::Star {
-                        if let ast::Expression::Ident(id) = *bexp.left {
-                            if comma || is_type_elem(&bexp.right) {
-                                return (
-                                    Some(id),
-                                    Some(ast::Expression::Unary(ast::UnaryExpression {
-                                        pos: bexp.pos,
-                                        op: bexp.op,
-                                        right: bexp.right,
-                                    })),
-                                );
-                            }
+                // ast::Expression::Operation(mut bexp) => {
+                //     if bexp.op == Operator::Star {
+                //         if let ast::Expression::Ident(id) = *bexp.x {
+                //             if comma || is_type_elem(&bexp.y.unwrap()) {
+                //                 return (
+                //                     Some(id),
+                //                     Some(ast::Expression::Operation(ast::Operation {
+                //                         pos: bexp.pos,
+                //                         op: bexp.op,
+                //                         x: bexp.y.unwrap(),
+                //                         y: None,
+                //                     })),
+                //                 );
+                //             }
 
-                            bexp.left = Box::new(ast::Expression::Ident(id));
-                        }
-                    }
+                //             bexp.x = Box::new(ast::Expression::Ident(id));
+                //         }
+                //     }
 
-                    if bexp.op == Operator::Or {
-                        match extract(*bexp.left, comma || is_type_elem(&bexp.right)) {
-                            (Some(id), Some(lhs)) => {
-                                return (
-                                    Some(id),
-                                    Some(ast::Expression::Binary(ast::BinaryExpression {
-                                        pos: bexp.pos,
-                                        op: bexp.op,
-                                        left: Box::new(lhs),
-                                        right: bexp.right,
-                                    })),
-                                );
-                            }
-                            (Some(id), None) => {
-                                bexp.left = Box::new(ast::Expression::Ident(id));
-                            }
-                            (None, Some(expr)) => {
-                                bexp.left = Box::new(expr);
-                            }
-                            _ => unreachable!(),
-                        }
-                    }
+                //     if bexp.op == Operator::Or {
+                //         match extract(*bexp.x, comma || is_type_elem(&bexp.y.unwrap())) {
+                //             (Some(id), Some(lhs)) => {
+                //                 return (
+                //                     Some(id),
+                //                     Some(ast::Expression::Operation(ast::Operation {
+                //                         pos: bexp.pos,
+                //                         op: bexp.op,
+                //                         x: Box::new(lhs),
+                //                         y: bexp.y,
+                //                     })),
+                //                 );
+                //             }
+                //             (Some(id), None) => {
+                //                 bexp.x = Box::new(ast::Expression::Ident(id));
+                //             }
+                //             (None, Some(expr)) => {
+                //                 bexp.x = Box::new(expr);
+                //             }
+                //             _ => unreachable!(),
+                //         }
+                //     }
 
-                    return (None, Some(ast::Expression::Binary(bexp)));
-                }
+                //     return (None, Some(ast::Expression::Operation(bexp)));
+                // }
                 ast::Expression::Call(mut cexp) => {
                     if let ast::Expression::Ident(id) = *cexp.left {
                         if cexp.args.len() == 1
@@ -958,19 +959,20 @@ impl Parser {
     // TypeTerm       = Type | UnderlyingType .
     // UnderlyingType = "~" Type .
     fn parse_type_elem(&mut self) -> Result<ast::Expression> {
-        let mut term = self.parse_type_term()?;
+        let mut typ = self.parse_type_term()?;
         while self.current_is(Operator::Or) {
-            let pos = self.expect(Operator::Or)?;
-            let right = self.parse_type_term()?;
-            term = ast::Expression::Binary(ast::BinaryExpression {
-                pos,
-                op: Operator::Or,
-                left: Box::new(term),
-                right: Box::new(right),
-            })
+            let op = Operator::Or;
+            let pos = self.current_pos();
+            self.next()?;
+
+            let x = Box::new(typ);
+            let y = Some(Box::new(self.parse_type_term()?));
+            let opt = ast::Operation { op, pos, x, y };
+
+            typ = ast::Expression::Operation(opt)
         }
 
-        Ok(term)
+        Ok(typ)
     }
 
     fn parse_type_term(&mut self) -> Result<ast::Expression> {
@@ -979,11 +981,12 @@ impl Parser {
         let typ = self.type_()?;
         Ok(match under_type {
             false => typ,
-            true => ast::Expression::Unary(ast::UnaryExpression {
-                pos,
-                op: Operator::Tiled,
-                right: Box::new(typ),
-            }),
+            true => {
+                let op = Operator::Tiled;
+                let x = Box::new(typ);
+                let opt = ast::Operation { pos, op, x, y: None };
+                ast::Expression::Operation(opt)
+            }
         })
     }
 
@@ -2255,10 +2258,6 @@ fn is_type_elem(expr: &ast::Expression) -> bool {
             | ast::Type::Map(..)
             | ast::Type::Channel(..),
         ) => true,
-        ast::Expression::Unary(u) => u.op == Operator::Tiled || is_type_elem(&u.right),
-        ast::Expression::Binary(b) => {
-            b.op == Operator::Tiled || is_type_elem(&b.left) || is_type_elem(&b.right)
-        }
         ast::Expression::Paren(p) => is_type_elem(&p.expr),
         _ => false,
     }

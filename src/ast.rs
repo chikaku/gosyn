@@ -178,19 +178,6 @@ pub struct Call {
     pub ellipsis: Option<usize>,
 }
 
-pub struct UnaryExpression {
-    pub pos: usize,
-    pub op: Operator,
-    pub right: Box<Expression>,
-}
-
-pub struct BinaryExpression {
-    pub pos: usize, // pos of operator
-    pub op: Operator,
-    pub left: Box<Expression>,
-    pub right: Box<Expression>,
-}
-
 pub struct ParenExpression {
     pub pos: (usize, usize),
     pub expr: Box<Expression>,
@@ -232,8 +219,6 @@ pub enum Expression {
     Range(RangeExpr),
     Star(StarExpression),
     Paren(ParenExpression),
-    Unary(UnaryExpression),
-    Binary(BinaryExpression),
     TypeAssert(TypeAssertion),
     CompositeLit(CompositeLit),
     List(Vec<Expression>),
@@ -581,8 +566,6 @@ impl Expression {
             Expression::Range(x) => x.pos,
             Expression::Star(x) => x.pos,
             Expression::Paren(x) => x.pos.0,
-            Expression::Unary(x) => x.pos,
-            Expression::Binary(x) => x.left.pos(),
             Expression::TypeAssert(x) => x.left.pos(),
             Expression::CompositeLit(x) => x.typ.pos(),
             Expression::IndexList(x) => x.left.pos(),
