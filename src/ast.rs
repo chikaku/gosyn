@@ -143,8 +143,8 @@ pub struct CompositeLit {
 
 pub struct Selector {
     pub pos: usize,
-    pub right: Ident,
-    pub left: Box<Expression>,
+    pub x: Box<Expression>,
+    pub sel: Ident,
 }
 
 pub struct TypeAssertion {
@@ -211,7 +211,7 @@ pub enum Expression {
     Index(Index),
     IndexList(IndexList),
     Slice(Slice),
-    Ident(TypeName),
+    Ident(Ident),
     FuncLit(FuncLit),
     Ellipsis(Ellipsis),
     Selector(Selector),
@@ -471,16 +471,6 @@ impl From<Ident> for Field {
     fn from(id: Ident) -> Self {
         Self {
             name: vec![],
-            typ: Expression::Type(id.into()),
-            tag: None,
-        }
-    }
-}
-
-impl From<TypeName> for Field {
-    fn from(id: TypeName) -> Self {
-        Self {
-            name: vec![],
             typ: Expression::Ident(id),
             tag: None,
         }
@@ -558,10 +548,10 @@ impl Expression {
             Expression::Call(x) => x.pos.0,
             Expression::Index(x) => x.pos.0,
             Expression::Slice(x) => x.pos.0,
-            Expression::Ident(x) => x.pos(),
+            Expression::Ident(x) => x.pos,
             Expression::FuncLit(x) => x.typ.pos,
             Expression::Ellipsis(x) => x.pos,
-            Expression::Selector(x) => x.left.pos(),
+            Expression::Selector(x) => x.x.pos(),
             Expression::BasicLit(x) => x.pos,
             Expression::Range(x) => x.pos,
             Expression::Star(x) => x.pos,
