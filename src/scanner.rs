@@ -8,7 +8,7 @@ use crate::PosTok;
 use std::str::FromStr;
 use unic_ucd_category::GeneralCategory;
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub struct Error {
     pub pos: Pos,
     pub reason: String,

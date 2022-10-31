@@ -208,7 +208,7 @@ impl Parser {
                 self.next()?;
                 Some(ast::StringLit { pos, value })
             }
-            current @ _ => {
+            current => {
                 self.current = current;
                 None
             }
@@ -339,7 +339,7 @@ impl Parser {
         let name = self.identifier()?;
         let typ_params = (recv.is_none() && self.current_is(Operator::BarackLeft))
             .then(|| self.parse_type_parameters())
-            .unwrap_or(Ok((Default::default(), false)))?
+            .unwrap_or_else(|| Ok((Default::default(), false)))?
             .0; // ignore extra comma
 
         let params = self.parameters()?;
@@ -727,7 +727,7 @@ impl Parser {
                     )) => {
                         let typ = self.qualified_ident(Some(name))?;
                         let tag = self.string_literal_or_none()?;
-                        return Ok(ast::Field { name: vec![], typ, tag });
+                        Ok(ast::Field { name: vec![], typ, tag })
                     }
                     _ => {
                         let mut name = self.identifier_list(Some(name))?;
@@ -747,7 +747,7 @@ impl Parser {
                         };
 
                         let tag = self.string_literal_or_none()?;
-                        return Ok(ast::Field { name, typ, tag });
+                        Ok(ast::Field { name, typ, tag })
                     }
                 }
             }
@@ -756,7 +756,7 @@ impl Parser {
                 self.next()?;
                 let typ = self.qualified_ident(None)?;
                 let tag = self.string_literal_or_none()?;
-                return Ok(ast::Field { name: vec![], typ, tag });
+                Ok(ast::Field { name: vec![], typ, tag })
             }
 
             _ => Err(self.else_error("expect field name or embeded field")),
@@ -934,14 +934,14 @@ impl Parser {
                 self.next()?;
                 let x = Box::new(self.unray_expression()?);
                 let opt = ast::Operation { pos, op, x, y: None };
-                return Ok(ast::Expression::Operation(opt));
+                Ok(ast::Expression::Operation(opt))
             }
 
             Some((pos, Token::Operator(op @ Operator::And))) => {
                 self.next()?;
                 let x = Box::new(unparen(self.unray_expression()?));
                 let opt = ast::Operation { pos, op, x, y: None };
-                return Ok(ast::Expression::Operation(opt));
+                Ok(ast::Expression::Operation(opt))
             }
 
             Some((pos, Token::Operator(op @ Operator::Arrow))) => {
@@ -950,13 +950,13 @@ impl Parser {
                     // convert `<- ChanType` to `<-chan Type`
                     ast::Expression::Type(ast::Type::Channel(typ)) => {
                         let chan_type = self.reset_chan_arrow(pos, typ)?;
-                        return Ok(ast::Expression::Type(ast::Type::Channel(chan_type)));
+                        Ok(ast::Expression::Type(ast::Type::Channel(chan_type)))
                     }
                     // receive message
                     x => {
                         let x = Box::new(x);
                         let opt = ast::Operation { pos, op, x, y: None };
-                        return Ok(ast::Expression::Operation(opt));
+                        Ok(ast::Expression::Operation(opt))
                     }
                 }
             }
@@ -968,14 +968,14 @@ impl Parser {
     /// Primary expressions are the operands for unary and binary expressions.
     /// ```text
     /// PrimaryExpr =
-    /// 	Operand |
-    /// 	Conversion |
-    /// 	MethodExpr |
-    /// 	PrimaryExpr Selector |
-    /// 	PrimaryExpr Index |
-    /// 	PrimaryExpr Slice |
-    /// 	PrimaryExpr TypeAssertion |
-    /// 	PrimaryExpr Arguments .
+    ///     Operand |
+    ///     Conversion |
+    ///     MethodExpr |
+    ///     PrimaryExpr Selector |
+    ///     PrimaryExpr Index |
+    ///     PrimaryExpr Slice |
+    ///     PrimaryExpr TypeAssertion |
+    ///     PrimaryExpr Arguments .
     ///
     ///     Selector       = "." identifier .
     ///     Index          = "[" Expression "]" .
@@ -1096,12 +1096,12 @@ impl Parser {
         match &self.current {
             Some((_, Token::Literal(LitKind::Ident, _))) => {
                 let name = self.identifier()?;
-                return Ok(ast::Expression::Ident(name));
+                Ok(ast::Expression::Ident(name))
             }
 
             Some((_, Token::Literal(..))) => {
                 let lit = self.literal()?;
-                return Ok(ast::Expression::BasicLit(lit));
+                Ok(ast::Expression::BasicLit(lit))
             }
 
             Some((_, Token::Operator(Operator::ParenLeft))) => {
@@ -1112,7 +1112,7 @@ impl Parser {
                 let pos1 = self.expect(Operator::ParenRight)?;
                 let pos = (pos, pos1);
                 let expr = ast::ParenExpression { pos, expr };
-                return Ok(ast::Expression::Paren(expr));
+                Ok(ast::Expression::Paren(expr))
             }
 
             Some((_, Token::Keyword(Keyword::Func))) => {
@@ -1124,7 +1124,7 @@ impl Parser {
                 }
 
                 let typ = ast::Type::Function(typ);
-                return Ok(ast::Expression::Type(typ));
+                Ok(ast::Expression::Type(typ))
             }
 
             Some((
@@ -1209,12 +1209,12 @@ impl Parser {
         // [:... [...
         index.push(Some(self.parse_next_level_expr()?));
         if self.current_is(Operator::BarackRight) {
-            let op = (colon > 0).then(|| Operator::Colon);
+            let op = (colon > 0).then_some(Operator::Colon);
             return Ok((op, index));
         }
 
-        match self.get_current().1 {
-            &token::COMMA => {
+        match *self.get_current().1 {
+            token::COMMA => {
                 // [a, ...
                 while self.skipped(Operator::Comma)? {
                     index.push(Some(self.parse_next_level_expr()?));
@@ -1222,7 +1222,7 @@ impl Parser {
                 Ok((Some(Operator::Comma), index))
             }
             // [:a:... [a:...
-            &token::COLON => {
+            token::COLON => {
                 self.next()?;
                 if self.current_is(Operator::BarackRight) {
                     return Ok((Some(Operator::Colon), index)); // [:a] [a:]
@@ -1371,7 +1371,7 @@ impl Parser {
                         ast::Expression::Index(mut typ) => {
                             // Type1, Type2[Args]
                             let id = id_list.pop().unwrap();
-                            typ.left = Box::new(ast::Expression::Ident(id.into()));
+                            typ.left = Box::new(ast::Expression::Ident(id));
                             let typ = ast::Expression::Index(typ);
                             let field = ast::Field { name: vec![], typ, tag: None };
 
@@ -1379,7 +1379,7 @@ impl Parser {
                             list.push(field);
                             return Ok(list);
                         }
-                        typ @ _ => {
+                        typ => {
                             // a, b [N]T
                             let name = id_list;
                             return Ok(vec![ast::Field { name, typ, tag: None }]);
@@ -2105,16 +2105,16 @@ impl Parser {
 /// https://github.com/golang/go/blob/master/src/cmd/compile/internal/syntax/parser.go#L665
 /// extra split x to name and expression
 /// x           force    name    expr
-//	------------------------------------
-//	P*[]int     T/F      P       *[]int
-//	P*E         T        P       *E
-//	P*E         F        nil     P*E
-//	P([]int)    T/F      P       []int
-//	P(E)        T        P       E
-//	P(E)        F        nil     P(E)
-//	P*E|F|~G    T/F      P       *E|F|~G
-//	P*E|F|G     T        P       *E|F|G
-//	P*E|F|G     F        nil     P*E|F|G
+//    ------------------------------------
+//    P*[]int     T/F      P       *[]int
+//    P*E         T        P       *E
+//    P*E         F        nil     P*E
+//    P([]int)    T/F      P       []int
+//    P(E)        T        P       E
+//    P(E)        F        nil     P(E)
+//    P*E|F|~G    T/F      P       *E|F|~G
+//    P*E|F|G     T        P       *E|F|G
+//    P*E|F|G     F        nil     P*E|F|G
 fn extract(expr: ast::Expression, force: bool) -> (Option<ast::Ident>, Option<ast::Expression>) {
     match expr {
         ast::Expression::Ident(id) => (Some(id), None),
@@ -2184,7 +2184,7 @@ fn extract(expr: ast::Expression, force: bool) -> (Option<ast::Ident>, Option<as
                 call.args = args;
                 call.func = Box::new(ast::Expression::Ident(id));
             }
-            return (None, Some(ast::Expression::Call(call)));
+            (None, Some(ast::Expression::Call(call)))
         }
         _ => (None, Some(expr)),
     }

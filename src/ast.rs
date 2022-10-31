@@ -73,7 +73,7 @@ pub struct FuncType {
     pub result: FieldList,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 pub enum ChanMode {
     Send,
     Recv,
