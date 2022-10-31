@@ -20,9 +20,10 @@ pub type Result<T> = core::result::Result<T, Error>;
 pub struct Scanner {
     pos: usize,
     index: usize,
+    semicolon: bool,
+
     source: String,
     lines: Vec<usize>,
-    semicolon: bool,
 }
 
 impl Scanner {
@@ -37,13 +38,14 @@ impl Scanner {
         self.pos
     }
 
-    pub fn preback(&self) -> (usize, usize) {
-        (self.pos, self.index)
+    pub fn preback(&self) -> (usize, usize, bool) {
+        (self.pos, self.index, self.semicolon)
     }
 
-    pub fn goback(&mut self, pre: (usize, usize)) {
+    pub fn goback(&mut self, pre: (usize, usize, bool)) {
         self.pos = pre.0;
         self.index = pre.1;
+        self.semicolon = pre.2
     }
 
     pub fn line_info(&self, pos: usize) -> (usize, usize) {

@@ -174,8 +174,8 @@ pub struct Slice {
 pub struct Call {
     pub pos: (usize, usize), // third pos > 0 means the ellipsis argument
     pub args: Vec<Expression>,
-    pub left: Box<Expression>,
-    pub ellipsis: Option<usize>,
+    pub func: Box<Expression>,
+    pub dots: Option<usize>,
 }
 
 pub struct ParenExpression {
@@ -518,10 +518,19 @@ impl TypeName {
 
 impl FieldList {
     pub fn pos(&self) -> usize {
-        match self.pos {
-            Some((pos, _)) => pos,
-            None => unreachable!("shouldn't call pos on empty field list"),
+        if let Some((pos, _)) = self.pos {
+            return pos;
         }
+
+        if let Some(field) = self.list.first() {
+            if let Some(name) = field.name.first() {
+                return name.pos;
+            }
+
+            return field.typ.pos();
+        }
+
+        panic!("call pos on empty FieldList");
     }
 }
 

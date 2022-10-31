@@ -130,11 +130,12 @@ impl Parser {
             .unwrap_or_else(|| self.scan.position())
     }
 
-    fn preback(&self) -> ((usize, usize), Option<PosTok>) {
+    fn preback(&self) -> ((usize, usize, bool), Option<PosTok>) {
         (self.scan.preback(), self.current.clone())
     }
 
-    fn goback(&mut self, pre: ((usize, usize), Option<PosTok>)) {
+    fn goback(&mut self, pre: ((usize, usize, bool), Option<PosTok>)) {
+        // TODO: find better way
         self.scan.goback(pre.0);
         self.current = pre.1;
     }
@@ -341,12 +342,12 @@ impl Parser {
             .unwrap_or(Ok((Default::default(), false)))?
             .0; // ignore extra comma
 
-        let typ = ast::FuncType {
-            pos,
-            typ_params,
-            params: self.parameters()?,
-            result: self.parse_result()?,
-        };
+        let params = self.parameters()?;
+        let params = self.check_field_list(params, true)?;
+        let result = self.parse_result()?;
+        let result = self.check_field_list(result, false)?;
+
+        let typ = ast::FuncType { pos, typ_params, params, result };
 
         let body = self
             .current_is(Operator::BraceLeft)
@@ -404,11 +405,19 @@ impl Parser {
         match self.current_kind() {
             TokenKind::Literal(LitKind::Ident) => {
                 let start2 = self.preback();
-                let expr = self.parse_next_level_expr()?;
-                let (pname, ptype) = extract(expr, self.current_is(Operator::Comma));
+
+                let mut x = ast::Expression::Ident(self.identifier()?);
+                if !self.current_is(Operator::BarackRight) {
+                    self.expr_level += 1;
+                    let p = self.primary_expression(Some(x))?;
+                    x = self.binary_expression(Some(p), 0)?;
+                    self.expr_level -= 1;
+                }
+
+                let (pname, ptype) = extract(x, self.current_is(Operator::Comma));
                 if pname.is_some() && (ptype.is_some() || !self.current_is(Operator::BarackRight)) {
                     self.goback(start);
-                    let params = self.parameters()?;
+                    let params = self.type_parameters()?;
                     let alias = self.skipped(Operator::Assign)?;
                     let typ = self.type_()?;
                     return Ok(ast::TypeSpec { docs, alias, name, typ, params });
@@ -684,7 +693,9 @@ impl Parser {
         }
 
         let params = self.parameters()?;
+        let params = self.check_field_list(params, true)?;
         let result = self.parse_result()?;
+        let result = self.check_field_list(result, false)?;
         let typ_params = ast::FieldList::default();
 
         Ok(ast::FuncType { pos, typ_params, params, result })
@@ -700,7 +711,6 @@ impl Parser {
             self.skipped(Operator::SemiColon)?;
         }
 
-        let fields = self.check_field_list(pos0, fields, false)?;
         let pos1 = self.expect(Operator::BraceRight)?;
         Ok(ast::StructType { pos: (pos0, pos1), fields })
     }
@@ -713,7 +723,7 @@ impl Parser {
                     Some((
                         _,
                         Token::Operator(Operator::Dot | Operator::SemiColon | Operator::BraceRight)
-                        | Token::Literal(..),
+                        | Token::Literal(LitKind::String, ..),
                     )) => {
                         let typ = self.qualified_ident(Some(name))?;
                         let tag = self.string_literal_or_none()?;
@@ -789,9 +799,15 @@ impl Parser {
     // MethodName  = identifier .
     fn parse_method_elem(&mut self) -> Result<ast::Field> {
         let id = self.identifier()?;
+
+        let params = self.parameters()?;
+        let params = self.check_field_list(params, true)?;
+        let result = self.parse_result()?;
+        let result = self.check_field_list(result, false)?;
+
         let typ = ast::Type::Function(ast::FuncType {
-            params: self.parameters()?,
-            result: self.parse_result()?,
+            params,
+            result,
             ..Default::default()
         });
 
@@ -949,6 +965,8 @@ impl Parser {
         }
     }
 
+    /// Primary expressions are the operands for unary and binary expressions.
+    /// ```text
     /// PrimaryExpr =
     /// 	Operand |
     /// 	Conversion |
@@ -965,6 +983,7 @@ impl Parser {
     ///                      "[" [ Expression ] ":" Expression ":" Expression "]" .
     ///     TypeAssertion  = "." "(" Type ")" .
     ///     Arguments      = "(" [ ( ExpressionList | Type [ "," ExpressionList ] ) [ "..." ] [ "," ] ] ")" .
+    /// ```
     fn primary_expression(&mut self, p: Option<ast::Expression>) -> Result<ast::Expression> {
         let mut x = match p {
             Some(expr) => expr,
@@ -1041,13 +1060,13 @@ impl Parser {
                         self.skipped(Operator::Comma)?;
                     }
 
-                    let left = Box::new(x);
+                    let func = Box::new(x);
                     let current_pos = self.current_pos();
-                    let ellipsis = self.skipped(Operator::Ellipsis)?.then_some(current_pos);
+                    let dots = self.skipped(Operator::Ellipsis)?.then_some(current_pos);
                     self.skipped(Operator::Comma)?; // (a, b...,)
 
                     let pos = (pos, self.expect(Operator::ParenRight)?);
-                    let call = ast::Call { pos, args, left, ellipsis };
+                    let call = ast::Call { pos, args, func, dots };
                     x = ast::Expression::Call(call);
                 }
 
@@ -1279,20 +1298,14 @@ impl Parser {
     }
 
     fn parse_result(&mut self) -> Result<ast::FieldList> {
-        let pos = self.current_pos();
         Ok(match self.current {
-            Some((_, Token::Operator(Operator::ParenLeft))) => {
-                let mut params = self.parameters()?;
-                params.list = self.check_field_list(pos, params.list, false)?;
-                params
-            }
+            Some((_, Token::Operator(Operator::ParenLeft))) => self.parameters()?,
             _ => {
                 let list = self
                     .type_or_none()?
                     .map(|typ| vec![typ.into()])
                     .unwrap_or_default();
 
-                let list = self.check_field_list(pos, list, false)?;
                 ast::FieldList { pos: None, list }
             }
         })
@@ -1301,16 +1314,23 @@ impl Parser {
     /// Parameters     = "(" [ ParameterList [ "," ] ] ")" .
     /// ParameterList  = ParameterDecl { "," ParameterDecl } .
     fn parameters(&mut self) -> Result<ast::FieldList> {
-        let pos0 = self.expect(Operator::ParenLeft)?;
+        self.params_list(Operator::ParenLeft, Operator::ParenRight)
+    }
+
+    fn type_parameters(&mut self) -> Result<ast::FieldList> {
+        self.params_list(Operator::BarackLeft, Operator::BarackRight)
+    }
+
+    fn params_list(&mut self, open: Operator, close: Operator) -> Result<ast::FieldList> {
+        let pos0 = self.expect(open)?;
 
         let mut list = vec![];
-        while !self.current_is(Operator::ParenRight) {
+        while !self.current_is(close) {
             list.extend(self.parse_parameter_decl()?);
             self.skipped(Operator::Comma)?; // extra comma
         }
 
-        let pos = Some((pos0, self.expect(Operator::ParenRight)?));
-        let list = self.check_field_list(pos0, list, true)?;
+        let pos = Some((pos0, self.expect(close)?));
         Ok(ast::FieldList { pos, list })
     }
 
@@ -1410,8 +1430,13 @@ impl Parser {
                     }
                 }
                 _ => {
+                    if end_with_comma {
+                        // a, b, Type
+                        return Ok(id_list.into_iter().map(|id| id.into()).collect::<Vec<_>>());
+                    }
+
                     // a, b Type
-                    let typ = self.type_()?;
+                    let typ = self.parse_type_elem()?;
                     let name = id_list;
                     return Ok(vec![ast::Field { name, typ, tag: None }]);
                 }
@@ -1496,16 +1521,12 @@ impl Parser {
         }))
     }
 
-    fn check_field_list(
-        &self,
-        pos: usize,
-        list: Vec<ast::Field>,
-        trailing: bool,
-    ) -> Result<Vec<ast::Field>> {
-        if list.is_empty() {
-            return Ok(list);
+    fn check_field_list(&self, fields: ast::FieldList, trailing: bool) -> Result<ast::FieldList> {
+        if fields.list.is_empty() {
+            return Ok(fields);
         }
 
+        let (pos, list) = (fields.pos(), &fields.list);
         let first = list.first().unwrap();
         let named = !first.name.is_empty();
         for (index, field) in list.iter().enumerate() {
@@ -1521,7 +1542,7 @@ impl Parser {
             }
         }
 
-        Ok(list)
+        Ok(fields)
     }
 
     fn parse_stmt_list(&mut self) -> Result<Vec<ast::Statement>> {
@@ -2081,65 +2102,89 @@ impl Parser {
     }
 }
 
-fn extract(expr: ast::Expression, comma: bool) -> (Option<ast::Ident>, Option<ast::Expression>) {
+/// https://github.com/golang/go/blob/master/src/cmd/compile/internal/syntax/parser.go#L665
+/// extra split x to name and expression
+/// x           force    name    expr
+//	------------------------------------
+//	P*[]int     T/F      P       *[]int
+//	P*E         T        P       *E
+//	P*E         F        nil     P*E
+//	P([]int)    T/F      P       []int
+//	P(E)        T        P       E
+//	P(E)        F        nil     P(E)
+//	P*E|F|~G    T/F      P       *E|F|~G
+//	P*E|F|G     T        P       *E|F|G
+//	P*E|F|G     F        nil     P*E|F|G
+fn extract(expr: ast::Expression, force: bool) -> (Option<ast::Ident>, Option<ast::Expression>) {
     match expr {
         ast::Expression::Ident(id) => (Some(id), None),
-        // ast::Expression::Operation(mut bexp) => {
-        //     if bexp.op == Operator::Star {
-        //         if let ast::Expression::Ident(id) = *bexp.x {
-        //             if comma || is_type_elem(&bexp.y.unwrap()) {
-        //                 return (
-        //                     Some(id),
-        //                     Some(ast::Expression::Operation(ast::Operation {
-        //                         pos: bexp.pos,
-        //                         op: bexp.op,
-        //                         x: bexp.y.unwrap(),
-        //                         y: None,
-        //                     })),
-        //                 );
-        //             }
-
-        //             bexp.x = Box::new(ast::Expression::Ident(id));
-        //         }
-        //     }
-
-        //     if bexp.op == Operator::Or {
-        //         match extract(*bexp.x, comma || is_type_elem(&bexp.y.unwrap())) {
-        //             (Some(id), Some(lhs)) => {
-        //                 return (
-        //                     Some(id),
-        //                     Some(ast::Expression::Operation(ast::Operation {
-        //                         pos: bexp.pos,
-        //                         op: bexp.op,
-        //                         x: Box::new(lhs),
-        //                         y: bexp.y,
-        //                     })),
-        //                 );
-        //             }
-        //             (Some(id), None) => {
-        //                 bexp.x = Box::new(ast::Expression::Ident(id));
-        //             }
-        //             (None, Some(expr)) => {
-        //                 bexp.x = Box::new(expr);
-        //             }
-        //             _ => unreachable!(),
-        //         }
-        //     }
-
-        //     return (None, Some(ast::Expression::Operation(bexp)));
-        // }
-        ast::Expression::Call(mut cexp) => {
-            if let ast::Expression::Ident(id) = *cexp.left {
-                if cexp.args.len() == 1
-                    && cexp.ellipsis.is_none()
-                    && (comma || is_type_elem(cexp.args.first().unwrap()))
-                {
-                    return (Some(id), Some(cexp.args.pop().unwrap()));
+        ast::Expression::Operation(mut opt) => match opt {
+            ast::Operation { y: None, .. } => (None, Some(ast::Expression::Operation(opt))),
+            ast::Operation {
+                x: box optx,
+                y: Some(box opty),
+                op: Operator::Star,
+                ..
+            } => match optx {
+                ast::Expression::Ident(id) if (force || is_type_elem(&opty)) => {
+                    (opt.x, opt.y) = (Box::new(opty), None);
+                    (Some(id), Some(ast::Expression::Operation(opt)))
                 }
+                _ => {
+                    (opt.x, opt.y) = (Box::new(optx), Some(Box::new(opty)));
+                    (None, Some(ast::Expression::Operation(opt)))
+                }
+            },
+            ast::Operation {
+                x: box optx,
+                y: Some(box opty),
+                op: Operator::Or,
+                ..
+            } => match extract(optx, force || is_type_elem(&opty)) {
+                (Some(name), Some(lhs)) => {
+                    (opt.x, opt.y) = (Box::new(lhs), Some(Box::new(opty)));
+                    (Some(name), Some(ast::Expression::Operation(opt)))
+                }
+                (Some(name), None) => {
+                    let optx = Box::new(ast::Expression::Ident(name));
+                    let opty = Some(Box::new(opty));
+                    (opt.x, opt.y) = (optx, opty);
+                    (None, Some(ast::Expression::Operation(opt)))
+                }
+                (None, Some(expr)) => {
+                    let optx = Box::new(expr);
+                    let opty = Some(Box::new(opty));
+                    (opt.x, opt.y) = (optx, opty);
+                    (None, Some(ast::Expression::Operation(opt)))
+                }
+                _ => panic!("extract lost"),
+            },
+            _ => (None, Some(ast::Expression::Operation(opt))),
+        },
+        ast::Expression::Call(mut call) => {
+            if let ast::Expression::Ident(id) = *call.func {
+                let mut args = call.args;
+                match (args.pop(), args.pop()) {
+                    (Some(arg0), None) => {
+                        if call.dots.is_none() && (force || is_type_elem(&arg0)) {
+                            return (Some(id), Some(arg0));
+                        }
+                        args.push(arg0);
+                    }
+                    (arg0, arg1) => {
+                        if let Some(arg) = arg1 {
+                            args.push(arg)
+                        }
+                        if let Some(arg) = arg0 {
+                            args.push(arg)
+                        }
+                    }
+                };
 
-                cexp.left = Box::new(ast::Expression::Ident(id));
+                call.args = args;
+                call.func = Box::new(ast::Expression::Ident(id));
             }
-            return (None, Some(ast::Expression::Call(cexp)));
+            return (None, Some(ast::Expression::Call(call)));
         }
         _ => (None, Some(expr)),
     }
@@ -2164,6 +2209,11 @@ fn is_type_elem(expr: &ast::Expression) -> bool {
             | ast::Type::Channel(..),
         ) => true,
         ast::Expression::Paren(p) => is_type_elem(&p.expr),
+        ast::Expression::Operation(opt) => match opt {
+            ast::Operation { op: Operator::Tiled, .. } => true,
+            ast::Operation { y: Some(opty), .. } => is_type_elem(opty),
+            ast::Operation { x: optx, .. } => is_type_elem(optx),
+        },
         _ => false,
     }
 }
@@ -2254,12 +2304,13 @@ mod test {
         func("func f(a, _ int, z float32) bool")?;
         func("func f(a, b int, z float32) (bool)")?;
         func("func f(prefix string, values ...int)")?;
-        func("func f(int, int, float64) (float64, *[]int)")?;
         func("func min[](x, y T) T { return Min(x, y) }")?;
         func("func min[S interface{ ~[]byte|string }]()")?;
-        func("func f(int, int, float64) (*a, []b, map[c]d)")?;
+        func("func f(int, int, float64) (float64, *[]int)")?;
         func("func (m *M) Print() { fmt.Print(m.message)}")?;
+        func("func f(int, int, float64) (*a, []b, map[c]d)")?;
         func("func min[T any](x, y T) T { return Min(x, y) }")?;
+        func("func fn2() (int, *int, int) { return 0, nil, 0 }")?;
         func("func a(w t1, r *t2, e chan<- t3) {x <- t4{c: c, t: t};}")?;
         func("func min[T ~int|~float64](x, y T) T { return Min(x, y) }")?;
         func("func (t *T) f(a *u) *s {return &t[(ptr(u.P(a))>>3)%size].root}")?;
@@ -2286,6 +2337,7 @@ mod test {
         typ("type S[E ~int | ~complex128, T ~*E] struct {F T}")?;
         typ("type S[T ~int | ~string, PT ~int | ~string | ~*T] struct {F T}")?;
         typ("type S[T int | *bool, PT *T | float64, PPT *PT | string] struct {F PPT}")?;
+        typ("type S[T any] struct { P[T]; l L[T]}")?;
 
         Ok(())
     }
@@ -2311,12 +2363,18 @@ mod test {
         params("(prefix string, values ...int)")?;
         params("(a, b int, z float64, opt ...T)")?;
 
-        assert!(params("(,)").is_err());
-        assert!(params("(...)").is_err());
-        assert!(params("(a, ...)").is_err());
-        assert!(params("(...int, bool)").is_err());
-        assert!(params("(...int, ...bool)").is_err());
-        assert!(params("(a, b, c, d ...int)").is_err());
+        let check = |s| {
+            let mut ps = Parser::from(s);
+            let params = ps.parameters()?;
+            ps.check_field_list(params, true)
+        };
+
+        assert!(check("(,)").is_err());
+        assert!(check("(...)").is_err());
+        assert!(check("(a, ...)").is_err());
+        assert!(check("(...int, bool)").is_err());
+        assert!(check("(...int, ...bool)").is_err());
+        assert!(check("(a, b, c, d ...int)").is_err());
 
         let ret_params = |s| Parser::from(s).parse_result();
 
@@ -2325,9 +2383,15 @@ mod test {
         ret_params("(int, bool)")?;
         ret_params("(a int, b bool)")?;
 
-        assert!(ret_params("(...bool)").is_err());
-        assert!(ret_params("(a int, bool)").is_err());
-        assert!(ret_params("(...bool, int)").is_err());
+        let check = |s| {
+            let mut ps = Parser::from(s);
+            let params = ps.parameters()?;
+            ps.check_field_list(params, false)
+        };
+
+        assert!(check("(...bool)").is_err());
+        assert!(check("(a int, bool)").is_err());
+        assert!(check("(...bool, int)").is_err());
 
         Ok(())
     }
@@ -2424,6 +2488,15 @@ mod test {
     fn parse_interface_type() -> Result<()> {
         let interface = |s| Parser::from(s).parse_interface_type();
 
+        interface("
+        interface {
+            P                // illegal: P is a type parameter
+            int | ~P         // illegal: P is a type parameter
+            ~int | MyInt     // illegal: the type sets for ~int and MyInt are not disjoint (~int includes MyInt)
+            float32 | Float  // overlapping type sets but Float is an interface
+        }
+    ")?;
+
         interface("interface{}")?;
         interface("interface{Close() error}")?;
         interface("interface{Show(int) string}")?;
@@ -2446,15 +2519,6 @@ mod test {
             }
         ",
         )?;
-
-        interface("
-            interface {
-                P                // illegal: P is a type parameter
-                int | ~P         // illegal: P is a type parameter
-                ~int | MyInt     // illegal: the type sets for ~int and MyInt are not disjoint (~int includes MyInt)
-                float32 | Float  // overlapping type sets but Float is an interface
-            }
-        ")?;
 
         assert!(interface("interface {a b}").is_err());
         assert!(interface("interface {a, b;}").is_err());
@@ -2479,6 +2543,7 @@ mod test {
         struct_("struct {x, y int}")?;
         struct_("struct {u float32}")?;
         struct_("struct {_ float32}")?;
+        struct_("struct {a T; b [1]T }")?;
         struct_("struct {a int; b bool}")?;
         struct_("struct {a int\nb bool}")?;
         struct_("struct {a int ``; b bool}")?;

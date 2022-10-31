@@ -34,6 +34,7 @@ impl Walkdir {
                     match entry {
                         Err(err) => Err(err),
                         Ok(file) => match file.path() {
+                            path if path.ends_with("testdata") => self.next(),
                             path if path.is_file() => Ok(Some(path)),
                             path if path.is_dir() => {
                                 let dir2 = path.read_dir()?;

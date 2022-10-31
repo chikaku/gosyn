@@ -1,4 +1,6 @@
 #![feature(trait_alias)]
+#![feature(box_patterns)]
+#![feature(let_chains)]
 #![feature(custom_inner_attributes)]
 
 use std::collections::HashMap;

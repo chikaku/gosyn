@@ -71,11 +71,14 @@ fn test_third_party_projects() -> Result<()> {
                 let mut walk = Walkdir::new(dir)?.with_ext([".go"], [".pb.go"])?;
                 println!("parsing {} ...", dir);
                 while let Some(path) = walk.next()? {
-                    println!(
-                        "  {}: {}μs",
-                        path.as_path().strip_prefix(&dir).unwrap().display(),
-                        parse_source(fs::read_to_string(&path)?, &path)?.as_micros(),
-                    );
+                    let source = fs::read_to_string(&path)?;
+                    if source.len() > 0 {
+                        println!(
+                            "  {}: {}μs",
+                            path.as_path().strip_prefix(&dir).unwrap().display(),
+                            parse_source(source, &path)?.as_micros(),
+                        );
+                    }
                 }
                 Ok(())
             })
