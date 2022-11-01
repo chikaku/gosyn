@@ -2,7 +2,6 @@ use crate::token::Token;
 use crate::token::TokenKind;
 use std::fmt::{Debug, Formatter};
 use std::io;
-use std::path::Path;
 use std::path::PathBuf;
 
 /// indicates all possible errors during parsing
@@ -28,20 +27,6 @@ pub enum Error {
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {
         Error::IO(err)
-    }
-}
-
-impl Error {
-    /// reset source path
-    pub fn with_path<P: AsRef<Path>>(self, path: P) -> Error {
-        let path = path.as_ref().into();
-        match self {
-            Error::IO(err) => Error::IO(err),
-            Self::Else { location, reason, .. } => Error::Else { path, location, reason },
-            Self::UnexpectedToken { location, expect, actual, .. } => {
-                Error::UnexpectedToken { location, expect, actual, path }
-            }
-        }
     }
 }
 

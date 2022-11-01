@@ -12,31 +12,31 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use walkdir::Walkdir;
 
-fn resolve<P: AsRef<Path>>(path: P) -> PathBuf {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    root.join(path)
-}
-
-fn parse_source<P: AsRef<Path>>(source: String, path: P) -> Result<Duration> {
+fn parse_source<P: AsRef<Path>>(path: P) -> Result<Duration> {
     let clock = Instant::now();
-    Parser::from(source)
+    Parser::from_file(path)?
         .parse_file()
         .map(|_| clock.elapsed())
-        .map_err(|err| err.with_path(path))
 }
 
 #[test]
-fn pprof_parser() {
-    // kubernetes/vendor/google.golang.org/api/compute/v0.beta/compute-gen.go
-    let path = resolve("tests/compute-gen.txt");
-    if !path.exists() {
-        return;
+fn pprof_parser() -> Result<()> {
+    let dir = match env::var("GOSYN_PPROF_TEST") {
+        Ok(path) => path,
+        _ => return Ok(()),
+    };
+
+    let mut wlk = Walkdir::new(&dir)?.with_ext([".go"], [])?;
+    let guard = pprof::ProfilerGuard::new(1000).unwrap();
+
+    let mut total = Duration::from_millis(0);
+    while let Some(path) = wlk.next()? {
+        let elapsed = parse_source(&path)?;
+        println!("  {:?} {:?}ms", &path, elapsed.as_millis());
+        total += elapsed;
     }
 
-    let source = fs::read_to_string(&path).unwrap();
-    let guard = pprof::ProfilerGuard::new(1000).unwrap();
-    let elapsed = parse_source(source, &path).unwrap();
-    println!("finished! {}ms", elapsed.as_millis());
+    println!("{:?} total elapsed {:?}ms", &dir, total.as_millis());
 
     let report = guard.report().build().unwrap();
     let file = fs::File::create("flamegraph.svg").unwrap();
@@ -47,17 +47,6 @@ fn pprof_parser() {
     let mut content = Vec::new();
     profile.encode(&mut content).unwrap();
     file.write_all(&content).unwrap();
-}
-
-#[test]
-fn test_exception_file() -> Result<()> {
-    let file = resolve("tests/exception.txt");
-    if file.exists() {
-        let source = fs::read_to_string(&file)?;
-        if source.lines().count() > 1 {
-            parse_source(source, file)?;
-        }
-    }
 
     Ok(())
 }
@@ -71,14 +60,11 @@ fn test_third_party_projects() -> Result<()> {
                 let mut walk = Walkdir::new(dir)?.with_ext([".go"], [".pb.go"])?;
                 println!("parsing {} ...", dir);
                 while let Some(path) = walk.next()? {
-                    let source = fs::read_to_string(&path)?;
-                    if source.len() > 0 {
-                        println!(
-                            "  {}: {}μs",
-                            path.as_path().strip_prefix(&dir).unwrap().display(),
-                            parse_source(source, &path)?.as_micros(),
-                        );
-                    }
+                    println!(
+                        "  {}: {}μs",
+                        path.as_path().strip_prefix(&dir).unwrap().display(),
+                        parse_source(&path)?.as_micros(),
+                    );
                 }
                 Ok(())
             })

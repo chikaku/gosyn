@@ -87,7 +87,7 @@ pub enum Operator {
     #[strum(serialize = ":=")]
     Define,
     #[strum(serialize = "...")]
-    Ellipsis,
+    DotDotDot,
 
     #[strum(serialize = "(")]
     ParenLeft,
@@ -186,7 +186,6 @@ pub enum Token {
     Keyword(Keyword),
     Operator(Operator),
     Literal(LitKind, String),
-    // TODO: split _Operator to delimiters
 }
 
 impl From<Keyword> for Token {
@@ -335,9 +334,3 @@ impl Debug for TokenKind {
         }
     }
 }
-
-/// alias to some often used token
-pub(crate) const COLON: Token = Token::Operator(Operator::Colon);
-pub(crate) const COMMA: Token = Token::Operator(Operator::Comma);
-pub(crate) const ARROW: Token = Token::Operator(Operator::Arrow);
-pub(crate) const LBRACE: Token = Token::Operator(Operator::BraceLeft);

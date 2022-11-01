@@ -28,7 +28,14 @@ pub struct Scanner {
 
 impl Scanner {
     pub fn new<S: AsRef<str>>(source: S) -> Self {
+        const BOM: &str = "\u{feff}";
+        let index = match source.as_ref().starts_with(BOM) {
+            true => 3,
+            false => 0,
+        };
+
         Scanner {
+            index,
             source: source.as_ref().into(),
             ..Default::default()
         }
@@ -433,6 +440,7 @@ impl Scanner {
             .next_char(skipped)
             .and_then(|exp| {
                 matches!(exp, 'e' | 'E' | 'p' | 'P').then(|| {
+                    let mut skipped = skipped;
                     (match self.next_char(skipped + 1) {
                         Some(signed @ ('+' | '-')) => {
                             skipped += 2;
@@ -583,7 +591,15 @@ mod tests {
 
     #[test]
     fn scan_lit_number() {
-        let numeric = |s| Scanner::new(s).scan_lit_number();
+        let numeric = |s: &str| {
+            let mut sc = Scanner::new(s);
+            let n = sc.scan_lit_number()?;
+            if n.str_len() != s.len() {
+                return Err(sc.error("scan not finished"));
+            }
+            Ok(n)
+        };
+
         assert!(numeric("1").is_ok());
         assert!(numeric("42").is_ok());
         assert!(numeric("4_2").is_ok());
@@ -613,10 +629,10 @@ mod tests {
         assert!(numeric("0.15e+0_2").is_ok());
         assert!(numeric("6.67428e-11").is_ok());
 
+        assert!(numeric("0x15e").is_ok());
         assert!(numeric("0x1p-2").is_ok());
         assert!(numeric("0x2.p10").is_ok());
         assert!(numeric("0X.8p-0").is_ok());
-        assert!(numeric("0x15e-2").is_ok());
         assert!(numeric("0x1.Fp+0").is_ok());
         assert!(numeric("0X_1FFFP-16").is_ok());
 
@@ -639,9 +655,10 @@ mod tests {
         assert!(numeric("0xabci").is_ok());
         assert!(numeric("1.e+0i").is_ok());
         assert!(numeric("2.71828i").is_ok());
-        assert!(numeric("0x1p-2i ").is_ok());
+        assert!(numeric("0x1p-2i").is_ok());
         assert!(numeric(".12345E+5i").is_ok());
         assert!(numeric("6.67428e-11i").is_ok());
+        assert!(numeric("7.7388724745781045e+00i").is_ok());
     }
 
     #[test]

@@ -21,11 +21,6 @@ pub struct Ident {
 
 // ================ Type Definition ================
 
-pub struct TypeName {
-    pub pkg: Option<Ident>,
-    pub name: Ident,
-}
-
 pub struct PointerType {
     pub pos: usize,
     pub typ: Box<Expression>,
@@ -90,18 +85,6 @@ pub struct InterfaceType {
     pub methods: FieldList,
 }
 
-pub enum Type {
-    Map(MapType),             // map[K]V
-    Ident(TypeName),          // pkg.Type
-    Array(ArrayType),         // [N]T
-    Slice(SliceType),         // []T
-    Function(FuncType),       // func (...) ...
-    Struct(StructType),       // struct { ... }
-    Channel(ChannelType),     // <-chan T | chan<- T | chan T
-    Pointer(PointerType),     // *T
-    Interface(InterfaceType), // interface { ... }
-}
-
 // ================ Expression Definition ================
 
 pub struct BasicLit {
@@ -118,7 +101,7 @@ pub struct StringLit {
 
 pub struct FuncLit {
     pub typ: FuncType,
-    pub body: Option<BlockStmt>, // FIXME: Why this have an option?
+    pub body: BlockStmt,
 }
 
 pub enum Element {
@@ -206,7 +189,6 @@ pub struct Operation {
 }
 
 pub enum Expression {
-    Type(Type), // FIXME: ugly design
     Call(Call),
     Index(Index),
     IndexList(IndexList),
@@ -223,6 +205,14 @@ pub enum Expression {
     CompositeLit(CompositeLit),
     List(Vec<Expression>),
     Operation(Operation),
+    TypeMap(MapType),             // map[K]V
+    TypeArray(ArrayType),         // [N]T
+    TypeSlice(SliceType),         // []T
+    TypeFunction(FuncType),       // func (...) ...
+    TypeStruct(StructType),       // struct { ... }
+    TypeChannel(ChannelType),     // <-chan T | chan<- T | chan T
+    TypePointer(PointerType),     // *T
+    TypeInterface(InterfaceType), // interface { ... }
 }
 
 // ================ Declaration Definition ================
@@ -455,18 +445,6 @@ pub struct Package {
 
 // ================ Type Implemention ================
 
-impl From<Ident> for TypeName {
-    fn from(id: Ident) -> Self {
-        Self { pkg: None, name: id }
-    }
-}
-
-impl From<Ident> for Type {
-    fn from(id: Ident) -> Self {
-        Self::Ident(id.into())
-    }
-}
-
 impl From<Ident> for Field {
     fn from(id: Ident) -> Self {
         Self {
@@ -484,16 +462,6 @@ impl From<BasicLit> for StringLit {
     }
 }
 
-impl From<Ellipsis> for Field {
-    fn from(ell: Ellipsis) -> Self {
-        Self {
-            name: vec![],
-            typ: Expression::Ellipsis(ell),
-            tag: None,
-        }
-    }
-}
-
 impl From<Expression> for Field {
     fn from(expr: Expression) -> Self {
         Self {
@@ -507,12 +475,6 @@ impl From<Expression> for Field {
 impl AssignStmt {
     pub fn is_range(&self) -> bool {
         matches!(self.right.first(), Some(Expression::Range(_)))
-    }
-}
-
-impl TypeName {
-    fn pos(&self) -> usize {
-        self.pkg.as_ref().map(|p| p.pos).unwrap_or(self.name.pos)
     }
 }
 
@@ -534,26 +496,9 @@ impl FieldList {
     }
 }
 
-impl Type {
-    fn pos(&self) -> usize {
-        match self {
-            Type::Map(x) => x.pos.0,
-            Type::Ident(x) => x.pos(),
-            Type::Array(x) => x.pos.0,
-            Type::Slice(x) => x.pos.0,
-            Type::Function(x) => x.pos,
-            Type::Struct(x) => x.pos.0,
-            Type::Channel(x) => x.pos.0,
-            Type::Pointer(x) => x.pos,
-            Type::Interface(x) => x.pos,
-        }
-    }
-}
-
 impl Expression {
     pub fn pos(&self) -> usize {
         match self {
-            Expression::Type(x) => x.pos(),
             Expression::Call(x) => x.pos.0,
             Expression::Index(x) => x.pos.0,
             Expression::Slice(x) => x.pos.0,
@@ -568,8 +513,16 @@ impl Expression {
             Expression::TypeAssert(x) => x.left.pos(),
             Expression::CompositeLit(x) => x.typ.pos(),
             Expression::IndexList(x) => x.left.pos(),
-            Expression::List(_) => unimplemented!(), // FIXME: if list is empty then we have no position
-            Expression::Operation(_) => unimplemented!(), // TODO: position of binary expression and unary expression
+            Expression::List(_) => unimplemented!("list may empty"),
+            Expression::Operation(x) => x.x.pos(),
+            Expression::TypeMap(x) => x.pos.0,
+            Expression::TypeArray(x) => x.pos.0,
+            Expression::TypeSlice(x) => x.pos.0,
+            Expression::TypeFunction(f) => f.pos,
+            Expression::TypeStruct(x) => x.pos.0,
+            Expression::TypeChannel(x) => x.pos.0,
+            Expression::TypePointer(x) => x.pos,
+            Expression::TypeInterface(x) => x.pos,
         }
     }
 }
