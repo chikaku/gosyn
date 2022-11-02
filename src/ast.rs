@@ -3,13 +3,12 @@
 use crate::token::Keyword;
 use crate::token::LitKind;
 use crate::token::Operator;
-use crate::Pos;
-use std::collections::HashMap;
+
 use std::path::PathBuf;
 use std::rc::Rc;
 
 pub struct Comment {
-    pub pos: Pos,
+    pub pos: usize,
     pub text: String,
 }
 
@@ -429,7 +428,7 @@ pub struct Import {
 
 #[derive(Default)]
 pub struct File {
-    pub path: PathBuf,
+    pub path: Option<PathBuf>,
     pub line_info: Vec<usize>,
     pub docs: Vec<Rc<Comment>>,
     pub pkg_name: Ident,
@@ -440,7 +439,7 @@ pub struct File {
 
 pub struct Package {
     pub path: PathBuf,
-    pub files: HashMap<PathBuf, File>,
+    pub files: Vec<File>,
 }
 
 // ================ Type Implemention ================

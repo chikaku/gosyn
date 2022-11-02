@@ -13,15 +13,8 @@ mod scanner;
 pub mod ast;
 pub mod token;
 
-pub use parser::Parser;
-
-/// represent the offset of a `Token` relative to the beginning of source code
-pub type Pos = usize;
-
-/// a tuple of `(Pos, Token)`
-pub type PosTok = (Pos, token::Token);
-
 pub use error::Error;
+pub use parser::Parser;
 
 /// standard parser result
 pub type Result<T> = core::result::Result<T, Error>;
@@ -49,10 +42,10 @@ pub fn parse_dir<P: AsRef<std::path::Path>>(dir_path: P) -> Result<HashMap<Strin
                 .or_insert(ast::Package {
                     // FIXME: here will be executed in every loop
                     path: dir_path.as_ref().into(),
-                    files: HashMap::new(),
+                    files: vec![],
                 })
                 .files
-                .insert(path, file);
+                .push(file);
         }
     }
 

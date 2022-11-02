@@ -1,26 +1,21 @@
 use crate::ast;
-use crate::ast::{BasicLit, ChanMode, ChannelType, Spec};
+use crate::ast::{ChanMode, ChannelType};
 use crate::scanner::Scanner;
 use crate::token::{IntoKind, Keyword, LitKind, Operator, Token, TokenKind};
 use crate::Error;
-use crate::Pos;
-use crate::PosTok;
 use crate::Result;
 
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::rc::Rc;
-use std::vec;
 
 #[derive(Default)]
 pub struct Parser {
-    path: PathBuf,
     scan: Scanner,
-    comments: Vec<Rc<ast::Comment>>, // all comments
 
     expr_level: i32,
+    comments: Vec<Rc<ast::Comment>>, // all comments
     lead_comments: Vec<Rc<ast::Comment>>,
-    current: Option<PosTok>,
+    current: Option<(usize, Token)>,
     // TODO: add an tok field without pos
     // treat None as token::None
 }
@@ -29,8 +24,7 @@ impl Parser {
     /// parse input source to `ast::File`, path will be \<input\>
     pub fn from<S: AsRef<str>>(s: S) -> Self {
         let mut parser = Parser {
-            scan: Scanner::new(s),
-            path: PathBuf::from("<input>"),
+            scan: Scanner::from(s),
             ..Default::default()
         };
 
@@ -40,10 +34,8 @@ impl Parser {
 
     /// read file content and parse to `ast::File`
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let source = fs::read_to_string(path.as_ref())?;
         let mut parser = Parser {
-            scan: Scanner::new(source),
-            path: path.as_ref().into(),
+            scan: Scanner::from_file(path)?,
             ..Default::default()
         };
 
@@ -53,7 +45,7 @@ impl Parser {
 }
 
 impl Parser {
-    fn unexpected<K: IntoKind>(&self, expect: &[K], actual: Option<PosTok>) -> Error {
+    fn unexpected<K: IntoKind>(&self, expect: &[K], actual: Option<(usize, Token)>) -> Error {
         let (pos, actual) = actual
             .map(|(pos, tok)| (pos, Some(tok)))
             .unwrap_or((self.scan.position(), None));
@@ -62,14 +54,14 @@ impl Parser {
         Error::UnexpectedToken {
             expect,
             actual,
-            path: self.path.clone(),
+            path: self.scan.path(),
             location: self.scan.line_info(pos),
         }
     }
 
-    fn else_error_at<S: AsRef<str>>(&self, pos: Pos, reason: S) -> Error {
+    fn else_error_at<S: AsRef<str>>(&self, pos: usize, reason: S) -> Error {
         Error::Else {
-            path: self.path.clone(),
+            path: self.scan.path(),
             location: self.scan.line_info(pos),
             reason: reason.as_ref().to_string(),
         }
@@ -127,23 +119,24 @@ impl Parser {
         }
     }
 
-    fn preback(&self) -> ((usize, usize, bool), Option<PosTok>) {
+    fn preback(&self) -> ((usize, usize, bool), Option<(usize, Token)>) {
         (self.scan.preback(), self.current.clone())
     }
 
-    fn goback(&mut self, pre: ((usize, usize, bool), Option<PosTok>)) {
+    fn goback(&mut self, pre: ((usize, usize, bool), Option<(usize, Token)>)) {
         // TODO: find better way
         self.scan.goback(pre.0);
         self.current = pre.1;
     }
 
-    fn scan_next(&mut self) -> Result<Option<PosTok>> {
-        self.scan
-            .next_token()
-            .map_err(|e| self.else_error_at(e.pos, e.reason))
+    fn scan_next(&mut self) -> Result<Option<(usize, Token)>> {
+        self.scan.next_token().map(|pos_tok| match pos_tok {
+            (_, Token::EOF) => None,
+            pos_tok => Some(pos_tok),
+        })
     }
 
-    fn next(&mut self) -> Result<Option<&PosTok>> {
+    fn next(&mut self) -> Result<Option<&(usize, Token)>> {
         let mut line = 0;
         let mut pos_tok = self.scan_next()?;
         while let Some((pos, Token::Comment(text))) = pos_tok {
@@ -221,7 +214,7 @@ impl Parser {
     /// including imports and `type`, `var`, `const` declarations
     pub fn parse_file(&mut self) -> Result<ast::File> {
         let mut file = ast::File {
-            path: self.path.clone(),
+            path: self.scan.path(),
             ..Default::default()
         };
 
@@ -351,7 +344,7 @@ impl Parser {
         Ok(ast::FuncDecl { docs, name, typ, recv, body })
     }
 
-    fn parse_decl<S: Spec, F: FnMut(&mut Parser, usize) -> Result<S>>(
+    fn parse_decl<S: ast::Spec, F: FnMut(&mut Parser, usize) -> Result<S>>(
         &mut self,
         mut parse_spec: F,
     ) -> Result<ast::Decl<S>> {
@@ -458,11 +451,11 @@ impl Parser {
         };
 
         match self.skipped(Operator::Assign)? {
-            true => spec.values = self.parse_expr_list()?,
+            true => spec.values = self.expression_list()?,
             false => {
                 spec.typ = Some(self.type_()?);
                 if self.skipped(Operator::Assign)? {
-                    spec.values = self.parse_expr_list()?;
+                    spec.values = self.expression_list()?;
                 }
             }
         }
@@ -483,12 +476,12 @@ impl Parser {
         };
 
         match self.skipped(Operator::Assign)? {
-            true => spec.values = self.parse_expr_list()?,
+            true => spec.values = self.expression_list()?,
             false => {
                 if self.current_is(LitKind::Ident) {
                     spec.typ = Some(self.type_()?);
                     self.expect(Operator::Assign)?;
-                    spec.values = self.parse_expr_list()?;
+                    spec.values = self.expression_list()?;
                 }
             }
         }
@@ -527,7 +520,7 @@ impl Parser {
         self.expr_level += 1;
         let expr = match strict {
             true => self.type_()?,
-            false => self.parse_expr()?,
+            false => self.expression()?,
         };
 
         let comma = self.skipped(Operator::Comma)?;
@@ -854,10 +847,10 @@ impl Parser {
         }
     }
 
-    fn parse_expr_list(&mut self) -> Result<Vec<ast::Expression>> {
-        let mut result = vec![self.parse_expr()?];
+    fn expression_list(&mut self) -> Result<Vec<ast::Expression>> {
+        let mut result = vec![self.expression()?];
         while self.skipped(Operator::Comma)? {
-            result.push(self.parse_expr()?);
+            result.push(self.expression()?);
         }
 
         Ok(result)
@@ -865,7 +858,7 @@ impl Parser {
 
     fn parse_next_level_expr(&mut self) -> Result<ast::Expression> {
         self.expr_level += 1;
-        let expr = self.parse_expr();
+        let expr = self.expression();
         self.expr_level -= 1;
         expr
     }
@@ -1124,11 +1117,6 @@ impl Parser {
         }
     }
 
-    /// parse source into golang Expression
-    pub fn parse_expr(&mut self) -> Result<ast::Expression> {
-        self.binary_expression(None, 0)
-    }
-
     /// reset the channel direction of expression `<- chan_typ`
     fn reset_chan_arrow(&mut self, pos: usize, mut typ: ChannelType) -> Result<ast::ChannelType> {
         match typ.dir {
@@ -1241,7 +1229,7 @@ impl Parser {
         match self.current.take() {
             Some((pos, Token::Literal(kind, value))) => {
                 self.next()?;
-                Ok(BasicLit { pos, kind, value })
+                Ok(ast::BasicLit { pos, kind, value })
             }
             _ => Err(self.else_error("expect basic literal")),
         }
@@ -1277,7 +1265,7 @@ impl Parser {
     fn parse_element_value(&mut self) -> Result<ast::Element> {
         Ok(match self.current_is(Operator::BraceLeft) {
             true => ast::Element::LitValue(self.parse_lit_value()?),
-            false => ast::Element::Expr(self.parse_expr()?),
+            false => ast::Element::Expr(self.expression()?),
         })
     }
 
@@ -1601,12 +1589,12 @@ impl Parser {
 
     fn parse_range_expr(&mut self) -> Result<ast::RangeExpr> {
         let pos = self.expect(Keyword::Range)?;
-        let right = Box::new(self.parse_expr()?);
+        let right = Box::new(self.expression()?);
         Ok(ast::RangeExpr { pos, right })
     }
 
     fn parse_simple_stmt(&mut self) -> Result<ast::Statement> {
-        let left = self.parse_expr_list()?;
+        let left = self.expression_list()?;
         let (pos, tok) = match &self.current {
             Some((pos, tok)) => (*pos, tok),
             _ => return Err(self.else_error("unexpected EOF")),
@@ -1633,7 +1621,7 @@ impl Parser {
                 let is_assign = op == Operator::Assign || op == Operator::Define;
                 let right = match is_range && is_assign {
                     true => vec![ast::Expression::Range(self.parse_range_expr()?)],
-                    false => self.parse_expr_list()?,
+                    false => self.expression_list()?,
                 };
 
                 if op == Operator::Define {
@@ -1656,7 +1644,7 @@ impl Parser {
                     },
                     Some((_, Token::Operator(Operator::Arrow))) => {
                         self.next()?;
-                        let value = self.parse_expr()?;
+                        let value = self.expression()?;
                         ast::Statement::Send(ast::SendStmt { pos, chan: expr, value })
                     }
                     Some((_, Token::Operator(op @ (Operator::Inc | Operator::Dec)))) => {
@@ -1724,7 +1712,7 @@ impl Parser {
 
     fn parse_go_stmt(&mut self) -> Result<ast::GoStmt> {
         let pos = self.expect(Keyword::Go)?;
-        match self.parse_expr()? {
+        match self.expression()? {
             ast::Expression::Call(call) => {
                 // { go f() } with no semicolon
                 self.skipped(Operator::SemiColon)?;
@@ -1736,7 +1724,7 @@ impl Parser {
 
     fn parse_defer_stmt(&mut self) -> Result<ast::DeferStmt> {
         let pos = self.expect(Keyword::Defer)?;
-        match self.parse_expr()? {
+        match self.expression()? {
             ast::Expression::Call(call) => {
                 self.expect(Operator::SemiColon)?;
                 Ok(ast::DeferStmt { pos, call })
@@ -1748,7 +1736,7 @@ impl Parser {
     fn parse_return_stmt(&mut self) -> Result<ast::ReturnStmt> {
         let pos = self.expect(Keyword::Return)?;
         let ret = (self.current_not(Operator::SemiColon) && self.current_not(Operator::BraceRight))
-            .then(|| self.parse_expr_list())
+            .then(|| self.expression_list())
             .unwrap_or(Ok(vec![]))?;
 
         self.skipped(Operator::SemiColon)?;
@@ -1890,7 +1878,7 @@ impl Parser {
                     (self.expect(Keyword::Case)?, Keyword::Case),
                     match type_assert {
                         true => self.parse_type_list()?,
-                        false => self.parse_expr_list()?,
+                        false => self.expression_list()?,
                     },
                 ),
                 _ => ((self.expect(Keyword::Default)?, Keyword::Default), vec![]),
@@ -1933,12 +1921,12 @@ impl Parser {
     }
 
     fn parse_comm_stmt(&mut self) -> Result<ast::Statement> {
-        let list = self.parse_expr_list()?;
+        let list = self.expression_list()?;
         Ok(match self.current.as_ref() {
             Some((pos, Token::Operator(Operator::Arrow))) => {
                 let pos = *pos;
                 self.next()?;
-                let value = self.parse_expr()?;
+                let value = self.expression()?;
                 let chan = self.check_single_expr(list)?;
                 ast::Statement::Send(ast::SendStmt { pos, chan, value })
             }
@@ -1956,7 +1944,7 @@ impl Parser {
                     self.check_assign_stmt(&left)?;
                 }
 
-                let right = vec![self.parse_expr()?];
+                let right = vec![self.expression()?];
                 ast::Statement::Assign(ast::AssignStmt { pos, op, left, right })
             }
             _ => {
@@ -2000,7 +1988,7 @@ impl Parser {
 
         if self.current_is(Keyword::Range) {
             let pos = (pos, self.expect(Keyword::Range)?);
-            let expr = self.parse_expr()?;
+            let expr = self.expression()?;
             self.expr_level = prev_level;
             let body = self.parse_block_stmt()?;
 
@@ -2386,7 +2374,7 @@ mod test {
 
     #[test]
     fn parse_expr() -> Result<()> {
-        let expr = |s| Parser::from(s).parse_expr();
+        let expr = |s| Parser::from(s).expression();
 
         expr("a + b")?;
         expr("a % b")?;

@@ -1,5 +1,6 @@
 use crate::token::Token;
 use crate::token::TokenKind;
+
 use std::fmt::{Debug, Formatter};
 use std::io;
 use std::path::PathBuf;
@@ -10,7 +11,7 @@ pub enum Error {
     IO(io::Error),
     /// syntax error such as some token are not in the right position
     UnexpectedToken {
-        path: PathBuf,
+        path: Option<PathBuf>,
         location: (usize, usize),
         expect: Vec<TokenKind>,
         actual: Option<Token>,
@@ -18,7 +19,7 @@ pub enum Error {
     /// some other parser errors include scanner errors
     /// such as parsing numeric literal errors
     Else {
-        path: PathBuf,
+        path: Option<PathBuf>,
         location: (usize, usize),
         reason: String,
     },
@@ -36,8 +37,12 @@ impl Debug for Error {
             Error::IO(err) => write!(f, "os error: {}", err),
             Error::UnexpectedToken { expect, actual, path, location } => {
                 let (line, offset) = location;
-                let path = path.as_os_str().to_str().unwrap();
-                let file_line = format!("{}:{}:{}", path, line, offset);
+                let path = match path {
+                    Some(path) => format!("{:?}", path.as_os_str()),
+                    None => "<input>".to_string(),
+                };
+
+                let file_line = format!("{:?}:{}:{}", path, line, offset);
                 let exp = match expect.len() {
                     0 => "expected something".to_string(),
                     1 => format!("expected {:?}", expect[0]),
@@ -51,8 +56,12 @@ impl Debug for Error {
             }
             Error::Else { path, location, reason } => {
                 let (line, offset) = location;
-                let path = path.as_os_str().to_str().unwrap();
-                write!(f, "{}:{}:{} {:?}", path, line, offset, reason)
+                let path = match path {
+                    Some(path) => format!("{:?}", path.as_os_str()),
+                    None => "<input>".to_string(),
+                };
+
+                write!(f, "{:?}:{}:{} {:?}", path, line, offset, reason)
             }
         }
     }

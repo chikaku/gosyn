@@ -82,8 +82,8 @@ fn test_parse_directory() -> Result<()> {
 
     for (name, pkg) in parse_dir(root)? {
         println!("package {}:", name);
-        for (path, _) in pkg.files {
-            println!("  {}", path.as_os_str().to_str().unwrap());
+        for file in pkg.files {
+            println!("  {:?}", &file.path);
         }
     }
 

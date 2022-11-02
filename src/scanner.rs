@@ -2,19 +2,14 @@ use crate::token::Keyword;
 use crate::token::LitKind;
 use crate::token::Operator;
 use crate::token::Token;
-use crate::Pos;
-use crate::PosTok;
+use crate::Error;
+use crate::Result;
 
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
 use std::str::FromStr;
 use unic_ucd_category::GeneralCategory;
-
-#[derive(PartialEq, Eq, Debug)]
-pub struct Error {
-    pub pos: Pos,
-    pub reason: String,
-}
-
-pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Default)]
 pub struct Scanner {
@@ -24,38 +19,50 @@ pub struct Scanner {
 
     source: String,
     lines: Vec<usize>,
+    path: Option<PathBuf>,
 }
 
 impl Scanner {
-    pub fn new<S: AsRef<str>>(source: S) -> Self {
-        const BOM: &str = "\u{feff}";
-        let index = match source.as_ref().starts_with(BOM) {
-            true => 3,
-            false => 0,
-        };
-
-        Scanner {
-            index,
-            source: source.as_ref().into(),
+    pub(crate) fn from<S: AsRef<str>>(s: S) -> Self {
+        Self {
+            source: s.as_ref().to_string(),
             ..Default::default()
         }
     }
 
-    pub fn position(&self) -> usize {
+    pub(crate) fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        const BOM: &str = "\u{feff}";
+        let mut source = fs::read_to_string(&path)?;
+        if source.starts_with(BOM) {
+            source = source.split_off(3);
+        }
+
+        Ok(Self {
+            source,
+            path: Some(path.as_ref().into()),
+            ..Default::default()
+        })
+    }
+
+    pub(crate) fn path(&self) -> Option<PathBuf> {
+        self.path.clone()
+    }
+
+    pub(crate) fn position(&self) -> usize {
         self.pos
     }
 
-    pub fn preback(&self) -> (usize, usize, bool) {
+    pub(crate) fn preback(&self) -> (usize, usize, bool) {
         (self.pos, self.index, self.semicolon)
     }
 
-    pub fn goback(&mut self, pre: (usize, usize, bool)) {
+    pub(crate) fn goback(&mut self, pre: (usize, usize, bool)) {
         self.pos = pre.0;
         self.index = pre.1;
         self.semicolon = pre.2
     }
 
-    pub fn line_info(&self, pos: usize) -> (usize, usize) {
+    pub(crate) fn line_info(&self, pos: usize) -> (usize, usize) {
         self.lines
             .iter()
             .enumerate()
@@ -70,16 +77,18 @@ impl Scanner {
     }
 
     fn error<S: AsRef<str>>(&self, reason: S) -> Error {
-        Error {
-            pos: self.pos,
-            reason: reason.as_ref().to_string(),
+        Error::Else {
+            path: self.path(),
+            location: self.line_info(self.pos),
+            reason: reason.as_ref().into(),
         }
     }
 
     fn error_at<S: AsRef<str>>(&self, pos: usize, reason: S) -> Error {
-        Error {
-            pos,
-            reason: reason.as_ref().to_string(),
+        Error::Else {
+            path: self.path(),
+            location: self.line_info(pos),
+            reason: reason.as_ref().into(),
         }
     }
 
@@ -133,7 +142,7 @@ impl Scanner {
         }
     }
 
-    pub fn skip_whitespace(&mut self) -> usize {
+    pub(crate) fn skip_whitespace(&mut self) -> usize {
         let mut skipped = 0;
         while let Some(ch) = self.next_char(0) {
             if ch.is_whitespace() {
@@ -152,28 +161,27 @@ impl Scanner {
         skipped
     }
 
-    pub fn next_token(&mut self) -> Result<Option<PosTok>> {
+    pub(crate) fn next_token(&mut self) -> Result<(usize, Token)> {
         if self.semicolon && self.line_ended() {
             let pos = self.pos;
             let tok = Token::Operator(Operator::SemiColon);
             self.semicolon = false;
-            return Ok(Some((pos, tok)));
+            return Ok((pos, tok));
         }
 
         self.semicolon = false;
         self.skip_whitespace();
-        Ok(match self.index >= self.source.len() {
-            true => None,
-            false => {
-                let current = self.pos;
-                let tok = self.scan_token()?;
-                self.add_token_cross_line(&tok);
-                self.index += tok.str_len();
-                self.pos += tok.char_count();
-                self.semicolon = self.try_insert_semicolon2(&tok);
-                Some((current, tok))
-            }
-        })
+        if self.index >= self.source.len() {
+            return Ok((self.pos, Token::EOF));
+        }
+
+        let current = self.pos;
+        let tok = self.scan_token()?;
+        self.add_token_cross_line(&tok);
+        self.index += tok.str_len();
+        self.pos += tok.char_count();
+        self.semicolon = self.try_insert_semicolon2(&tok);
+        Ok((current, tok))
     }
 
     fn add_token_cross_line(&mut self, tok: &Token) {
@@ -190,7 +198,7 @@ impl Scanner {
     }
 
     /// return next Token
-    pub fn scan_token(&mut self) -> Result<Token> {
+    pub(crate) fn scan_token(&mut self) -> Result<Token> {
         if let Ok(op) = Operator::from_str(&self.next_nchar(3)) {
             return Ok(op.into());
         }
@@ -545,7 +553,7 @@ mod tests {
 
     #[test]
     fn line_ended() {
-        let ended = |s| Scanner::new(s).line_ended();
+        let ended = |s| Scanner::from(s).line_ended();
 
         assert!(!ended("1"));
         assert!(!ended("/**/123"));
@@ -559,14 +567,14 @@ mod tests {
     fn insert_semicolon() {
         let semi = Token::Operator(Operator::SemiColon);
 
-        let mut scan = Scanner::new("return//\nreturn");
-        let mut next = move || scan.next_token().unwrap().unwrap().1;
+        let mut scan = Scanner::from("return//\nreturn");
+        let mut next = move || scan.next_token().unwrap().1;
         assert_ne!(next(), semi);
         assert_eq!(next(), semi);
         assert_ne!(next(), semi);
 
-        let mut scan = Scanner::new("a\nb\nc");
-        let mut next = move || scan.next_token().unwrap().unwrap().1;
+        let mut scan = Scanner::from("a\nb\nc");
+        let mut next = move || scan.next_token().unwrap().1;
         assert_ne!(next(), semi);
         assert_eq!(next(), semi);
         assert_ne!(next(), semi);
@@ -576,14 +584,14 @@ mod tests {
 
     #[test]
     fn scan_text() {
-        let mut scan = Scanner::new("'一', '二', '三'");
+        let mut scan = Scanner::from("'一', '二', '三'");
         assert!(scan.next_token().is_ok());
         assert!(scan.next_token().is_ok());
         assert!(scan.next_token().is_ok());
         assert!(scan.next_token().is_ok());
         assert!(scan.next_token().is_ok());
 
-        let mut scan = Scanner::new("n%9");
+        let mut scan = Scanner::from("n%9");
         assert!(scan.next_token().is_ok());
         assert!(scan.next_token().is_ok());
         assert!(scan.next_token().is_ok());
@@ -592,7 +600,7 @@ mod tests {
     #[test]
     fn scan_lit_number() {
         let numeric = |s: &str| {
-            let mut sc = Scanner::new(s);
+            let mut sc = Scanner::from(s);
             let n = sc.scan_lit_number()?;
             if n.str_len() != s.len() {
                 return Err(sc.error("scan not finished"));
@@ -663,7 +671,7 @@ mod tests {
 
     #[test]
     fn scan_lit_rune() {
-        let rune = |s| Scanner::new(s).scan_lit_rune();
+        let rune = |s| Scanner::from(s).scan_lit_rune();
         assert!(rune(r#"'a'"#).is_ok());
         assert!(rune(r#"'ä'"#).is_ok());
         assert!(rune(r#"'本'"#).is_ok());
@@ -686,7 +694,7 @@ mod tests {
 
     #[test]
     fn scan_lit_string() {
-        let lit_str = |s| Scanner::new(s).scan_lit_string();
+        let lit_str = |s| Scanner::from(s).scan_lit_string();
 
         assert!(lit_str("`abc`").is_ok());
         assert!(lit_str(r#""\n""#).is_ok());
@@ -703,21 +711,37 @@ mod tests {
 
     #[test]
     fn scan_comment() {
-        let mut comments = Scanner::new("// 注释\r\n//123\n/*注释*/");
+        let mut comments = Scanner::from("// 注释\r\n//123\n/*注释*/");
 
-        let next = comments.next_token().map(|x| x.map(|(_, tok)| tok));
-        assert_eq!(next, Ok(Some(Token::Comment(String::from("// 注释\r")))));
-        let next = comments.next_token().map(|x| x.map(|(_, tok)| tok));
-        assert_eq!(next, Ok(Some(Token::Comment(String::from("//123")))));
-        let next = comments.next_token().map(|x| x.map(|(_, tok)| tok));
-        assert_eq!(next, Ok(Some(Token::Comment(String::from("/*注释*/")))));
+        let next = comments.next_token().map(|x| x.1);
+        assert!(match next {
+            Ok(Token::Comment(comment)) => comment == "// 注释\r",
+            _ => false,
+        });
+
+        let next = comments.next_token().map(|x| x.1);
+        assert!(match next {
+            Ok(Token::Comment(comment)) => comment == "//123",
+            _ => false,
+        });
+
+        let next = comments.next_token().map(|x| x.1);
+        assert!(match next {
+            Ok(Token::Comment(comment)) => comment == "/*注释*/",
+            _ => false,
+        });
     }
 
     #[test]
     fn scan_line_info() {
         let code = "package main 代码 \n/*😃\n注释*/\n\n//🎃\n\n";
-        let mut scanner = Scanner::new(code);
-        while let Ok(Some(_)) = scanner.next_token() {}
+        let mut scanner = Scanner::from(code);
+        while let Ok(tok) = scanner.next_token() {
+            if tok.1 == Token::EOF {
+                break;
+            }
+        }
+
         let mut lines = scanner.lines.iter();
         assert_eq!(lines.next(), Some(&17));
         assert_eq!(lines.next(), Some(&21));
