@@ -182,7 +182,6 @@ pub enum LitKind {
 
 #[derive(Eq, PartialEq, Clone)]
 pub enum Token {
-    EOF,
     Comment(String),
     Keyword(Keyword),
     Operator(Operator),
@@ -242,7 +241,6 @@ impl Keyword {
 impl Debug for Token {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Token::EOF => write!(f, ""),
             Token::Comment(_) => write!(f, "/* comment */"),
             Token::Literal(_, lit) => write!(f, "'{}'", lit),
             Token::Operator(op) => write!(f, "'{}'", op.to_str()),
@@ -254,7 +252,6 @@ impl Debug for Token {
 impl Token {
     pub fn str_len(&self) -> usize {
         match self {
-            Token::EOF => 0,
             Token::Operator(op) => op.to_str().len(),
             Token::Keyword(word) => word.to_str().len(),
             Token::Comment(text) => text.len(),
@@ -264,7 +261,6 @@ impl Token {
 
     pub fn char_count(&self) -> usize {
         match self {
-            Token::EOF => 0,
             Token::Operator(op) => op.to_str().len(),
             Token::Keyword(word) => word.to_str().len(),
             Token::Comment(text) => text.chars().count(),
@@ -274,7 +270,6 @@ impl Token {
 
     pub fn kind(&self) -> TokenKind {
         match self {
-            Token::EOF => TokenKind::EOF,
             Token::Comment(_) => TokenKind::Comment,
             Token::Operator(op) => TokenKind::Operator(*op),
             Token::Keyword(word) => TokenKind::Keyword(*word),
@@ -298,7 +293,6 @@ pub(crate) trait IntoKind = Into<TokenKind> + Copy;
 
 #[derive(Eq, PartialEq, Copy, Clone)]
 pub enum TokenKind {
-    EOF,
     Comment,
     Keyword(Keyword),
     Literal(LitKind),
@@ -326,7 +320,6 @@ impl From<Operator> for TokenKind {
 impl Debug for TokenKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::EOF => unreachable!(),
             Self::Comment => unreachable!(),
             Self::Keyword(word) => write!(f, "'{}'", word.to_str()),
             Self::Operator(op) => write!(f, "'{}'", op.to_str()),

@@ -130,10 +130,7 @@ impl Parser {
     }
 
     fn scan_next(&mut self) -> Result<Option<(usize, Token)>> {
-        self.scan.next_token().map(|pos_tok| match pos_tok {
-            (_, Token::EOF) => None,
-            pos_tok => Some(pos_tok),
-        })
+        self.scan.next_token()
     }
 
     fn next(&mut self) -> Result<Option<&(usize, Token)>> {
@@ -554,10 +551,8 @@ impl Parser {
             Some((_, Token::Operator(Operator::Star))) => {
                 let pos = self.expect(Operator::Star)?;
                 let typ = Box::new(self.type_()?);
-                Ok(Some(ast::Expression::TypePointer(ast::PointerType {
-                    pos,
-                    typ,
-                })))
+                let ptr = ast::PointerType { pos, typ };
+                Ok(Some(ast::Expression::TypePointer(ptr)))
             }
 
             Some((_, Token::Operator(Operator::Arrow))) => {
@@ -566,11 +561,8 @@ impl Parser {
                 let typ = Box::new(self.type_()?);
                 let pos = (pos, pos1);
                 let dir = Some(ChanMode::Recv);
-                Ok(Some(ast::Expression::TypeChannel(ast::ChannelType {
-                    pos,
-                    dir,
-                    typ,
-                })))
+                let chan = ast::ChannelType { pos, dir, typ };
+                Ok(Some(ast::Expression::TypeChannel(chan)))
             }
 
             Some((_, Token::Keyword(Keyword::Func))) => {

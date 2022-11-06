@@ -77,11 +77,7 @@ impl Scanner {
     }
 
     fn error<S: AsRef<str>>(&self, reason: S) -> Error {
-        Error::Else {
-            path: self.path(),
-            location: self.line_info(self.pos),
-            reason: reason.as_ref().into(),
-        }
+        self.error_at(self.pos, reason)
     }
 
     fn error_at<S: AsRef<str>>(&self, pos: usize, reason: S) -> Error {
@@ -161,18 +157,18 @@ impl Scanner {
         skipped
     }
 
-    pub(crate) fn next_token(&mut self) -> Result<(usize, Token)> {
+    pub(crate) fn next_token(&mut self) -> Result<Option<(usize, Token)>> {
         if self.semicolon && self.line_ended() {
             let pos = self.pos;
             let tok = Token::Operator(Operator::SemiColon);
             self.semicolon = false;
-            return Ok((pos, tok));
+            return Ok(Some((pos, tok)));
         }
 
         self.semicolon = false;
         self.skip_whitespace();
         if self.index >= self.source.len() {
-            return Ok((self.pos, Token::EOF));
+            return Ok(None);
         }
 
         let current = self.pos;
@@ -181,7 +177,7 @@ impl Scanner {
         self.index += tok.str_len();
         self.pos += tok.char_count();
         self.semicolon = self.try_insert_semicolon2(&tok);
-        Ok((current, tok))
+        Ok(Some((current, tok)))
     }
 
     fn add_token_cross_line(&mut self, tok: &Token) {
@@ -565,21 +561,23 @@ mod tests {
 
     #[test]
     fn insert_semicolon() {
-        let semi = Token::Operator(Operator::SemiColon);
+        const SEMI: Token = Token::Operator(Operator::SemiColon);
 
         let mut scan = Scanner::from("return//\nreturn");
-        let mut next = move || scan.next_token().unwrap().1;
-        assert_ne!(next(), semi);
-        assert_eq!(next(), semi);
-        assert_ne!(next(), semi);
+        let mut next = move || scan.next_token();
+
+        assert!(!matches!(next(), Ok(Some((_, SEMI)))));
+        assert!(matches!(next(), Ok(Some((_, SEMI)))));
+        assert!(!matches!(next(), Ok(Some((_, SEMI)))));
 
         let mut scan = Scanner::from("a\nb\nc");
-        let mut next = move || scan.next_token().unwrap().1;
-        assert_ne!(next(), semi);
-        assert_eq!(next(), semi);
-        assert_ne!(next(), semi);
-        assert_eq!(next(), semi);
-        assert_ne!(next(), semi);
+        let mut next = move || scan.next_token();
+
+        assert!(!matches!(next(), Ok(Some((_, SEMI)))));
+        assert!(matches!(next(), Ok(Some((_, SEMI)))));
+        assert!(!matches!(next(), Ok(Some((_, SEMI)))));
+        assert!(matches!(next(), Ok(Some((_, SEMI)))));
+        assert!(!matches!(next(), Ok(Some((_, SEMI)))));
     }
 
     #[test]
@@ -713,21 +711,21 @@ mod tests {
     fn scan_comment() {
         let mut comments = Scanner::from("// 注释\r\n//123\n/*注释*/");
 
-        let next = comments.next_token().map(|x| x.1);
+        let next = comments.next_token();
         assert!(match next {
-            Ok(Token::Comment(comment)) => comment == "// 注释\r",
+            Ok(Some((_, Token::Comment(comment)))) => comment == "// 注释\r",
             _ => false,
         });
 
-        let next = comments.next_token().map(|x| x.1);
+        let next = comments.next_token();
         assert!(match next {
-            Ok(Token::Comment(comment)) => comment == "//123",
+            Ok(Some((_, Token::Comment(comment)))) => comment == "//123",
             _ => false,
         });
 
-        let next = comments.next_token().map(|x| x.1);
+        let next = comments.next_token();
         assert!(match next {
-            Ok(Token::Comment(comment)) => comment == "/*注释*/",
+            Ok(Some((_, Token::Comment(comment)))) => comment == "/*注释*/",
             _ => false,
         });
     }
@@ -736,11 +734,7 @@ mod tests {
     fn scan_line_info() {
         let code = "package main 代码 \n/*😃\n注释*/\n\n//🎃\n\n";
         let mut scanner = Scanner::from(code);
-        while let Ok(tok) = scanner.next_token() {
-            if tok.1 == Token::EOF {
-                break;
-            }
-        }
+        while let Ok(Some(..)) = scanner.next_token() {}
 
         let mut lines = scanner.lines.iter();
         assert_eq!(lines.next(), Some(&17));
