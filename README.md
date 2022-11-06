@@ -2,7 +2,7 @@
 
 Golang's syntax parser in Rust follow by the [Specification](https://go.dev/ref/spec).
 
-Type parameters grammar are not supported for now, wait for the specification stable.
+Performance is bad for now because of many unnecessary utf-8 decode in scanner.
 
 ## documentation
 
