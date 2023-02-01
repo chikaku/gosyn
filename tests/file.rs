@@ -1,16 +1,15 @@
 mod walkdir;
+use walkdir::Walkdir;
 
 use gosyn::parse_dir;
 use gosyn::Parser;
 use gosyn::Result;
-use pprof::protos::Message;
+
 use std::env;
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use walkdir::Walkdir;
 
 fn parse_source<P: AsRef<Path>>(path: P) -> Result<Duration> {
     let clock = Instant::now();
@@ -41,12 +40,6 @@ fn pprof_parser() -> Result<()> {
     let report = guard.report().build().unwrap();
     let file = fs::File::create("flamegraph.svg").unwrap();
     report.flamegraph(file).unwrap();
-
-    let mut file = fs::File::create("profile.pb").unwrap();
-    let profile = report.pprof().unwrap();
-    let mut content = Vec::new();
-    profile.encode(&mut content).unwrap();
-    file.write_all(&content).unwrap();
 
     Ok(())
 }

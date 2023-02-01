@@ -226,7 +226,7 @@ impl Scanner {
             }
             other => match next0_char_op {
                 Some(op) => op.into(),
-                _ => return Err(self.error(format!("unresolved character {:?}", other))),
+                _ => return Err(self.error(format!("unresolved character {other:?}"))),
             },
         })
     }
@@ -297,7 +297,7 @@ impl Scanner {
                 Some('u') => match_n(4, is_hex_digit)?,
                 Some('U') => match_n(8, is_hex_digit)?,
                 Some(ch) if is_octal_digit(ch) => match_n(2, is_octal_digit)?,
-                Some(ch) if is_escaped_char(ch) => return Ok(format!("\\{}", ch)),
+                Some(ch) if is_escaped_char(ch) => return Ok(format!("\\{ch}")),
                 Some(_) => return Err(self.error("unknown escape sequence")),
                 None => return Err(self.error("literal not terminated")),
             },
@@ -331,7 +331,7 @@ impl Scanner {
         let rune = self.scan_rune(self.index + 1)?;
         let index = self.index + 1 + rune.len();
         match self.source.get(index..index + 1) {
-            Some("'") => Ok(format!("'{}'", rune)),
+            Some("'") => Ok(format!("'{rune}'")),
             Some(_) => Err(self.error_at(self.pos, "rune literal expect termination")),
             None => Err(self.error_at(self.pos, "rune literal not termination")),
         }
@@ -448,11 +448,11 @@ impl Scanner {
                     (match self.next_char(skipped + 1) {
                         Some(signed @ ('+' | '-')) => {
                             skipped += 2;
-                            format!("{}{}", exp, signed)
+                            format!("{exp}{signed}")
                         }
                         _ => {
                             skipped += 1;
-                            format!("{}", exp)
+                            format!("{exp}")
                         }
                     }) + &self.scan_digits(
                         skipped,
@@ -530,7 +530,7 @@ fn is_octal_digit(c: char) -> bool {
 }
 
 fn is_decimal_digit(c: char) -> bool {
-    matches!(c, '0'..='9')
+    c.is_ascii_digit()
 }
 
 fn is_hex_digit(c: char) -> bool {

@@ -200,8 +200,8 @@ impl From<Operator> for Token {
     }
 }
 
+#[rustfmt::skip]
 impl Operator {
-    #![rustfmt::skip]
     pub fn precedence(&self) -> usize {
         match self {
             | Operator::OrOr => 1,
@@ -212,9 +212,9 @@ impl Operator {
             | Operator::Greater
             | Operator::LessEqual
             | Operator::GreaterEqual => 3,
-            | Operator::Add 
-            | Operator::Sub 
-            | Operator::Or 
+            | Operator::Add
+            | Operator::Sub
+            | Operator::Or
             | Operator::Xor => 4,
             | Operator::Star
             | Operator::Quo
@@ -226,7 +226,7 @@ impl Operator {
             _ => 0,
         }
     }
-    
+
     fn to_str(self) -> &'static str {
         self.into()
     }
@@ -242,7 +242,7 @@ impl Debug for Token {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Token::Comment(_) => write!(f, "/* comment */"),
-            Token::Literal(_, lit) => write!(f, "'{}'", lit),
+            Token::Literal(_, lit) => write!(f, "'{lit}'"),
             Token::Operator(op) => write!(f, "'{}'", op.to_str()),
             Token::Keyword(word) => write!(f, "'{}'", word.to_str()),
         }
@@ -288,8 +288,6 @@ impl Token {
         }
     }
 }
-
-pub(crate) trait IntoKind = Into<TokenKind> + Copy;
 
 #[derive(Eq, PartialEq, Copy, Clone)]
 pub enum TokenKind {

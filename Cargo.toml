@@ -1,6 +1,6 @@
 [package]
 name = "gosyn"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 authors = ["Kevin Chen <kevin@chenbc.me>"]
 description = "Golang syntax parser in Rust"
@@ -11,7 +11,7 @@ license = "MIT"
 
 [dependencies]
 unic-ucd-category = "0.9.0"
-strum = { version = "0.23", features = ["derive"] }
+strum = { version = "0.24.1", features = ["derive"] }
 
 [dev-dependencies]
-pprof = { version = "0.6.2", features = ["flamegraph", "protobuf"] }
+pprof = { version = "0.11.0", features = ["flamegraph"] }

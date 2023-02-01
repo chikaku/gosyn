@@ -1,7 +1,7 @@
 use crate::ast;
 use crate::ast::{ChanMode, ChannelType};
 use crate::scanner::Scanner;
-use crate::token::{IntoKind, Keyword, LitKind, Operator, Token, TokenKind};
+use crate::token::{Keyword, LitKind, Operator, Token, TokenKind};
 use crate::Error;
 use crate::Result;
 
@@ -45,7 +45,10 @@ impl Parser {
 }
 
 impl Parser {
-    fn unexpected<K: IntoKind>(&self, expect: &[K], actual: Option<(usize, Token)>) -> Error {
+    fn unexpected<K>(&self, expect: &[K], actual: Option<(usize, Token)>) -> Error
+    where
+        K: Into<TokenKind> + Copy,
+    {
         let (pos, actual) = actual
             .map(|(pos, tok)| (pos, Some(tok)))
             .unwrap_or((self.scan.position(), None));
@@ -71,7 +74,10 @@ impl Parser {
         self.else_error_at(self.scan.position(), reason)
     }
 
-    fn expect<K: IntoKind>(&mut self, expect: K) -> Result<usize> {
+    fn expect<K>(&mut self, expect: K) -> Result<usize>
+    where
+        K: Into<TokenKind> + Copy,
+    {
         let current = self.current.take();
         if let Some((pos, tok)) = &current {
             if tok.is(expect) {
@@ -84,7 +90,10 @@ impl Parser {
     }
 
     /// skip while current equal to expect
-    fn skipped<K: IntoKind>(&mut self, expect: K) -> Result<bool> {
+    fn skipped<K>(&mut self, expect: K) -> Result<bool>
+    where
+        K: Into<TokenKind>,
+    {
         Ok(match &self.current {
             Some((_, tok)) if tok.is(expect) => {
                 self.next()?;
@@ -94,14 +103,20 @@ impl Parser {
         })
     }
 
-    fn current_is<K: IntoKind>(&self, expect: K) -> bool {
+    fn current_is<K>(&self, expect: K) -> bool
+    where
+        K: Into<TokenKind>,
+    {
         match &self.current {
             Some((_, tok)) => tok.is(expect),
             None => false,
         }
     }
 
-    fn current_not<K: IntoKind>(&self, expect: K) -> bool {
+    fn current_not<K>(&self, expect: K) -> bool
+    where
+        K: Into<TokenKind>,
+    {
         !self.current_is(expect)
     }
 
@@ -2091,39 +2106,39 @@ fn extract(expr: ast::Expression, force: bool) -> (Option<ast::Ident>, Option<as
         ast::Expression::Operation(mut opt) => match opt {
             ast::Operation { y: None, .. } => (None, Some(ast::Expression::Operation(opt))),
             ast::Operation {
-                x: box optx,
-                y: Some(box opty),
+                x: optx,
+                y: Some(opty),
                 op: Operator::Star,
                 ..
-            } => match optx {
+            } => match *optx {
                 ast::Expression::Ident(id) if (force || is_type_elem(&opty)) => {
-                    (opt.x, opt.y) = (Box::new(opty), None);
+                    (opt.x, opt.y) = (opty, None);
                     (Some(id), Some(ast::Expression::Operation(opt)))
                 }
                 _ => {
-                    (opt.x, opt.y) = (Box::new(optx), Some(Box::new(opty)));
+                    (opt.x, opt.y) = (optx, Some(opty));
                     (None, Some(ast::Expression::Operation(opt)))
                 }
             },
             ast::Operation {
-                x: box optx,
-                y: Some(box opty),
+                x: optx,
+                y: Some(opty),
                 op: Operator::Or,
                 ..
-            } => match extract(optx, force || is_type_elem(&opty)) {
+            } => match extract(*optx, force || is_type_elem(&opty)) {
                 (Some(name), Some(lhs)) => {
-                    (opt.x, opt.y) = (Box::new(lhs), Some(Box::new(opty)));
+                    (opt.x, opt.y) = (Box::new(lhs), Some(opty));
                     (Some(name), Some(ast::Expression::Operation(opt)))
                 }
                 (Some(name), None) => {
                     let optx = Box::new(ast::Expression::Ident(name));
-                    let opty = Some(Box::new(opty));
+                    let opty = Some(opty);
                     (opt.x, opt.y) = (optx, opty);
                     (None, Some(ast::Expression::Operation(opt)))
                 }
                 (None, Some(expr)) => {
                     let optx = Box::new(expr);
-                    let opty = Some(Box::new(opty));
+                    let opty = Some(opty);
                     (opt.x, opt.y) = (optx, opty);
                     (None, Some(ast::Expression::Operation(opt)))
                 }

@@ -34,7 +34,7 @@ impl From<io::Error> for Error {
 impl Debug for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::IO(err) => write!(f, "os error: {}", err),
+            Error::IO(err) => write!(f, "os error: {err}"),
             Error::UnexpectedToken { expect, actual, path, location } => {
                 let (line, offset) = location;
                 let path = match path {
@@ -42,16 +42,16 @@ impl Debug for Error {
                     None => "<input>".to_string(),
                 };
 
-                let file_line = format!("{:?}:{}:{}", path, line, offset);
+                let file_line = format!("{path:?}:{line}:{offset}");
                 let exp = match expect.len() {
                     0 => "expected something".to_string(),
                     1 => format!("expected {:?}", expect[0]),
-                    _ => format!("expected {:?}", expect),
+                    _ => format!("expected {expect:?}"),
                 };
 
                 match actual {
-                    None => write!(f, "{} {}, found EOF", file_line, exp),
-                    Some(tok) => write!(f, "{} {}, found {:?}", file_line, exp, tok),
+                    None => write!(f, "{file_line} {exp}, found EOF"),
+                    Some(tok) => write!(f, "{file_line} {exp}, found {tok:?}"),
                 }
             }
             Error::Else { path, location, reason } => {
@@ -61,7 +61,7 @@ impl Debug for Error {
                     None => "<input>".to_string(),
                 };
 
-                write!(f, "{:?}:{}:{} {:?}", path, line, offset, reason)
+                write!(f, "{path:?}:{line}:{offset} {reason:?}")
             }
         }
     }
