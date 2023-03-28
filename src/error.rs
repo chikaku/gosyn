@@ -1,6 +1,7 @@
 use crate::token::Token;
 use crate::token::TokenKind;
 
+use std::fmt::Display;
 use std::fmt::{Debug, Formatter};
 use std::io;
 use std::path::PathBuf;
@@ -64,5 +65,11 @@ impl Debug for Error {
                 write!(f, "{path:?}:{line}:{offset} {reason:?}")
             }
         }
+    }
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
     }
 }

@@ -4,15 +4,17 @@ use crate::token::Keyword;
 use crate::token::LitKind;
 use crate::token::Operator;
 
+use std::fmt::Debug;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+#[derive(Debug)]
 pub struct Comment {
     pub pos: usize,
     pub text: String,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Ident {
     pub pos: usize,
     pub name: String,
@@ -20,46 +22,52 @@ pub struct Ident {
 
 // ================ Type Definition ================
 
+#[derive(Debug)]
 pub struct PointerType {
     pub pos: usize,
     pub typ: Box<Expression>,
 }
 
+#[derive(Debug)]
 pub struct ArrayType {
     pub pos: (usize, usize),
     pub len: Box<Expression>,
     pub typ: Box<Expression>,
 }
 
+#[derive(Debug)]
 pub struct SliceType {
     pub pos: (usize, usize),
     pub typ: Box<Expression>,
 }
 
+#[derive(Debug)]
 pub struct MapType {
     pub pos: (usize, usize),
     pub key: Box<Expression>,
     pub val: Box<Expression>,
 }
 
+#[derive(Debug)]
 pub struct Field {
     pub name: Vec<Ident>,
     pub typ: Expression,
     pub tag: Option<StringLit>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct FieldList {
     pub pos: Option<(usize, usize)>,
     pub list: Vec<Field>,
 }
 
+#[derive(Debug)]
 pub struct StructType {
     pub pos: (usize, usize),
     pub fields: Vec<Field>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct FuncType {
     pub pos: usize,
     pub typ_params: FieldList,
@@ -67,18 +75,20 @@ pub struct FuncType {
     pub result: FieldList,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug)]
 pub enum ChanMode {
     Send,
     Recv,
 }
 
+#[derive(Debug)]
 pub struct ChannelType {
     pub pos: (usize, usize), // chan, <-
     pub dir: Option<ChanMode>,
     pub typ: Box<Expression>,
 }
 
+#[derive(Debug)]
 pub struct InterfaceType {
     pub pos: usize,
     pub methods: FieldList,
@@ -86,73 +96,85 @@ pub struct InterfaceType {
 
 // ================ Expression Definition ================
 
+#[derive(Debug)]
 pub struct BasicLit {
     pub pos: usize,
     pub kind: LitKind,
     pub value: String,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct StringLit {
     pub pos: usize,
     pub value: String,
 }
 
+#[derive(Debug)]
 pub struct FuncLit {
     pub typ: FuncType,
     pub body: BlockStmt,
 }
 
+#[derive(Debug)]
 pub enum Element {
     Expr(Expression),
     LitValue(LiteralValue),
 }
 
+#[derive(Debug)]
 pub struct KeyedElement {
     pub key: Option<Element>,
     pub val: Element,
 }
 
+#[derive(Debug)]
 pub struct LiteralValue {
     pub pos: (usize, usize),
     pub values: Vec<KeyedElement>,
 }
 
+#[derive(Debug)]
 pub struct CompositeLit {
     pub typ: Box<Expression>,
     pub val: LiteralValue,
 }
 
+#[derive(Debug)]
 pub struct Selector {
     pub pos: usize,
     pub x: Box<Expression>,
     pub sel: Ident,
 }
 
+#[derive(Debug)]
 pub struct TypeAssertion {
     pub pos: (usize, usize),
     pub left: Box<Expression>,
     pub right: Option<Box<Expression>>, // None for x.(type)
 }
 
+#[derive(Debug)]
 pub struct Index {
     pub pos: (usize, usize),
     pub left: Box<Expression>,
     pub index: Box<Expression>,
 }
 
+#[derive(Debug)]
 pub struct IndexList {
     pub pos: (usize, usize),
     pub left: Box<Expression>,
     pub indices: Vec<Expression>,
 }
 
+#[derive(Debug)]
 pub struct Slice {
     pub pos: (usize, usize),
     pub left: Box<Expression>,
     pub index: [Option<Box<Expression>>; 3],
 }
 
+#[derive(Debug)]
 pub struct Call {
     pub pos: (usize, usize), // third pos > 0 means the ellipsis argument
     pub args: Vec<Expression>,
@@ -160,26 +182,31 @@ pub struct Call {
     pub dots: Option<usize>,
 }
 
+#[derive(Debug)]
 pub struct ParenExpression {
     pub pos: (usize, usize),
     pub expr: Box<Expression>,
 }
 
+#[derive(Debug)]
 pub struct StarExpression {
     pub pos: usize,
     pub right: Box<Expression>,
 }
 
+#[derive(Debug)]
 pub struct Ellipsis {
     pub pos: usize,
     pub elt: Option<Box<Expression>>,
 }
 
+#[derive(Debug)]
 pub struct RangeExpr {
     pub pos: usize, // pos of 'range'
     pub right: Box<Expression>,
 }
 
+#[derive(Debug)]
 pub struct Operation {
     pub pos: usize,
     pub op: Operator,
@@ -216,6 +243,7 @@ pub enum Expression {
 
 // ================ Declaration Definition ================
 
+#[derive(Debug)]
 pub struct Decl<T> {
     pub docs: Vec<Rc<Comment>>,
     pub pos0: usize,                  // pos of var | const | type
@@ -223,7 +251,7 @@ pub struct Decl<T> {
     pub specs: Vec<T>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct VarSpec {
     pub docs: Vec<Rc<Comment>>,
     pub name: Vec<Ident>,
@@ -231,7 +259,7 @@ pub struct VarSpec {
     pub values: Vec<Expression>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct ConstSpec {
     pub docs: Vec<Rc<Comment>>,
     pub name: Vec<Ident>,
@@ -239,6 +267,7 @@ pub struct ConstSpec {
     pub values: Vec<Expression>,
 }
 
+#[derive(Debug)]
 pub struct TypeSpec {
     pub docs: Vec<Rc<Comment>>,
     pub alias: bool,
@@ -247,6 +276,7 @@ pub struct TypeSpec {
     pub typ: Expression,
 }
 
+#[derive(Debug)]
 pub struct FuncDecl {
     pub docs: Vec<Rc<Comment>>,
     pub recv: Option<FieldList>,
@@ -255,6 +285,7 @@ pub struct FuncDecl {
     pub body: Option<BlockStmt>,
 }
 
+#[derive(Debug)]
 pub enum Declaration {
     Function(FuncDecl),
     Type(Decl<TypeSpec>),
@@ -264,38 +295,45 @@ pub enum Declaration {
 
 // ================ Statement Definition ================
 
+#[derive(Debug)]
 pub struct BlockStmt {
     pub pos: (usize, usize),
     pub list: Vec<Statement>,
 }
 
+#[derive(Debug)]
 pub enum DeclStmt {
     Type(Decl<TypeSpec>),
     Const(Decl<ConstSpec>),
     Variable(Decl<VarSpec>),
 }
 
+#[derive(Debug)]
 pub struct GoStmt {
     pub pos: usize,
     pub call: Call,
 }
 
+#[derive(Debug)]
 pub struct DeferStmt {
     pub pos: usize,
     pub call: Call,
 }
 
+#[derive(Debug)]
 pub struct ReturnStmt {
     pub pos: usize,
     pub ret: Vec<Expression>,
 }
 
+#[derive(Debug)]
 pub struct BranchStmt {
     pub pos: usize,
     pub key: Keyword,
     pub ident: Option<Ident>,
 }
 
+#[derive(Debug)]
 pub struct IfStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
@@ -304,6 +342,7 @@ pub struct IfStmt {
     pub else_: Option<Box<Statement>>,
 }
 
+#[derive(Debug)]
 pub struct AssignStmt {
     // position of assign operator like = | += | &=
     pub pos: usize,
@@ -312,22 +351,26 @@ pub struct AssignStmt {
     pub right: Vec<Expression>,
 }
 
+#[derive(Debug)]
 pub struct LabeledStmt {
     pub pos: usize,
     pub name: Ident,
     pub stmt: Box<Statement>,
 }
 
+#[derive(Debug)]
 pub struct SendStmt {
     pub pos: usize,
     pub chan: Expression,
     pub value: Expression,
 }
 
+#[derive(Debug)]
 pub struct ExprStmt {
     pub expr: Expression,
 }
 
+#[derive(Debug)]
 pub struct CaseClause {
     pub tok: Keyword,
     pub pos: (usize, usize),
@@ -335,11 +378,13 @@ pub struct CaseClause {
     pub body: Vec<Box<Statement>>,
 }
 
+#[derive(Debug)]
 pub struct CaseBlock {
     pub pos: (usize, usize),
     pub body: Vec<CaseClause>,
 }
 
+#[derive(Debug)]
 pub struct SwitchStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
@@ -347,6 +392,7 @@ pub struct SwitchStmt {
     pub block: CaseBlock,
 }
 
+#[derive(Debug)]
 pub struct TypeSwitchStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
@@ -354,12 +400,14 @@ pub struct TypeSwitchStmt {
     pub block: CaseBlock,
 }
 
+#[derive(Debug)]
 pub struct IncDecStmt {
     pub pos: usize,
     pub op: Operator,
     pub expr: Expression,
 }
 
+#[derive(Debug)]
 pub struct CommClause {
     pub pos: (usize, usize), // pos of (keyword, colon)
     pub tok: Keyword,
@@ -367,16 +415,19 @@ pub struct CommClause {
     pub body: Vec<Box<Statement>>,
 }
 
+#[derive(Debug)]
 pub struct CommBlock {
     pub pos: (usize, usize),
     pub body: Vec<CommClause>,
 }
 
+#[derive(Debug)]
 pub struct SelectStmt {
     pub pos: usize,
     pub body: CommBlock,
 }
 
+#[derive(Debug)]
 pub struct RangeStmt {
     pub pos: (usize, usize), // pos of (for, range)
     pub key: Option<Expression>,
@@ -386,6 +437,7 @@ pub struct RangeStmt {
     pub body: BlockStmt,
 }
 
+#[derive(Debug)]
 pub struct ForStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
@@ -394,6 +446,7 @@ pub struct ForStmt {
     pub body: BlockStmt,
 }
 
+#[derive(Debug)]
 pub struct EmptyStmt {
     pub pos: usize,
 }
@@ -420,13 +473,13 @@ pub enum Statement {
     Declaration(DeclStmt),
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Import {
     pub name: Option<Ident>,
     pub path: StringLit,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct File {
     pub path: Option<PathBuf>,
     pub line_info: Vec<usize>,
@@ -437,6 +490,7 @@ pub struct File {
     pub comments: Vec<Rc<Comment>>,
 }
 
+#[derive(Debug)]
 pub struct Package {
     pub path: PathBuf,
     pub files: Vec<File>,
@@ -548,5 +602,73 @@ impl Spec for ConstSpec {
     fn with_docs(mut self, docs: Vec<Rc<Comment>>) -> ConstSpec {
         self.docs = docs;
         self
+    }
+}
+
+impl Debug for Expression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Call(arg0) => f.debug_tuple("Call").field(arg0).finish(),
+            Self::Index(arg0) => f.debug_tuple("Index").field(arg0).finish(),
+            Self::IndexList(arg0) => f.debug_tuple("IndexList").field(arg0).finish(),
+            Self::Slice(arg0) => f.debug_tuple("Slice").field(arg0).finish(),
+            Self::Ident(arg0) => f.debug_tuple("Ident").field(arg0).finish(),
+            Self::FuncLit(arg0) => f.debug_tuple("FuncLit").field(arg0).finish(),
+            Self::Ellipsis(arg0) => f.debug_tuple("Ellipsis").field(arg0).finish(),
+            Self::Selector(arg0) => f.debug_tuple("Selector").field(arg0).finish(),
+            Self::BasicLit(arg0) => f.debug_tuple("BasicLit").field(arg0).finish(),
+            Self::Range(arg0) => f.debug_tuple("Range").field(arg0).finish(),
+            Self::Star(arg0) => f.debug_tuple("Star").field(arg0).finish(),
+            Self::Paren(arg0) => f.debug_tuple("Paren").field(arg0).finish(),
+            Self::TypeAssert(arg0) => f.debug_tuple("TypeAssert").field(arg0).finish(),
+            Self::CompositeLit(arg0) => f.debug_tuple("CompositeLit").field(arg0).finish(),
+            Self::List(arg0) => f.debug_tuple("List").field(arg0).finish(),
+            Self::Operation(arg0) => f.debug_tuple("Operation").field(arg0).finish(),
+            Self::TypeMap(arg0) => f.debug_tuple("TypeMap").field(arg0).finish(),
+            Self::TypeArray(arg0) => f.debug_tuple("TypeArray").field(arg0).finish(),
+            Self::TypeSlice(arg0) => f.debug_tuple("TypeSlice").field(arg0).finish(),
+            Self::TypeFunction(arg0) => f.debug_tuple("TypeFunction").field(arg0).finish(),
+            Self::TypeStruct(arg0) => f.debug_tuple("TypeStruct").field(arg0).finish(),
+            Self::TypeChannel(arg0) => f.debug_tuple("TypeChannel").field(arg0).finish(),
+            Self::TypePointer(arg0) => f.debug_tuple("TypePointer").field(arg0).finish(),
+            Self::TypeInterface(arg0) => f.debug_tuple("TypeInterface").field(arg0).finish(),
+        }
+    }
+}
+
+impl Debug for Statement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Go(arg0) => f.debug_tuple("Go").field(arg0).finish(),
+            Self::If(arg0) => f.debug_tuple("If").field(arg0).finish(),
+            Self::For(arg0) => f.debug_tuple("For").field(arg0).finish(),
+            Self::Send(arg0) => f.debug_tuple("Send").field(arg0).finish(),
+            Self::Expr(arg0) => f.debug_tuple("Expr").field(arg0).finish(),
+            Self::Defer(arg0) => f.debug_tuple("Defer").field(arg0).finish(),
+            Self::Block(arg0) => f.debug_tuple("Block").field(arg0).finish(),
+            Self::Range(arg0) => f.debug_tuple("Range").field(arg0).finish(),
+            Self::Empty(arg0) => f.debug_tuple("Empty").field(arg0).finish(),
+            Self::Label(arg0) => f.debug_tuple("Label").field(arg0).finish(),
+            Self::IncDec(arg0) => f.debug_tuple("IncDec").field(arg0).finish(),
+            Self::Assign(arg0) => f.debug_tuple("Assign").field(arg0).finish(),
+            Self::Return(arg0) => f.debug_tuple("Return").field(arg0).finish(),
+            Self::Branch(arg0) => f.debug_tuple("Branch").field(arg0).finish(),
+            Self::Switch(arg0) => f.debug_tuple("Switch").field(arg0).finish(),
+            Self::Select(arg0) => f.debug_tuple("Select").field(arg0).finish(),
+            Self::TypeSwitch(arg0) => f.debug_tuple("TypeSwitch").field(arg0).finish(),
+            Self::Declaration(arg0) => f.debug_tuple("Declaration").field(arg0).finish(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::parse_source;
+
+    #[test]
+    fn show_debug() {
+        let source = include_str!("../tests/testdata/helloworld.go");
+        let s = parse_source(source).unwrap();
+        println!("{:#?}", s);
     }
 }

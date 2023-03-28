@@ -2664,35 +2664,10 @@ mod test {
 
     #[test]
     fn parse_docs() -> Result<()> {
-        let code: &str = "
-        // comments...
-
-        // docs for file
-        package main
-
-        // docs for type declaration
-        type empty struct{}
-
-        // comments...
-
-        // docs for variable declaration
-        /* 123 */ /* 456 */
-        var (
-            // docs for spec
-            ints = 1
-        )
-
-        /* 123 
-        
-        123
-        */
-        // docs for function declaration
-        func main() {}
-        ";
-
+        let code = include_str!("../tests/testdata/docs.go");
         let mut ast = Parser::from(code).parse_file()?;
 
-        assert_eq!(ast.docs.len(), 1);
+        assert_eq!(ast.docs.len(), 2);
         while let Some(decl) = ast.decl.pop() {
             match decl {
                 Declaration::Const(..) => continue,
