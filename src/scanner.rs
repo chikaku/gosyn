@@ -63,13 +63,14 @@ impl Scanner {
     }
 
     pub(crate) fn line_info(&self, pos: usize) -> (usize, usize) {
-        self.lines
-            .iter()
-            .enumerate()
-            .take_while(|(_, &start)| pos >= start)
-            .last()
-            .map(|(index, &start)| (index + 1, pos - start))
-            .unwrap_or((1, pos))
+        match self.lines.binary_search(&pos) {
+            Ok(index) => (index + 1, 0),
+            Err(0) => (1, pos),
+            Err(index) => {
+                let start_at = self.lines[index - 1];
+                (index, pos - start_at)
+            }
+        }
     }
 
     fn add_line(&mut self, line_start: usize) {
