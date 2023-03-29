@@ -134,11 +134,11 @@ impl Parser {
         }
     }
 
-    fn preback(&self) -> ((usize, usize, bool), Option<(usize, Token)>) {
+    fn preback(&self) -> ((usize, bool), Option<(usize, Token)>) {
         (self.scan.preback(), self.current.clone())
     }
 
-    fn goback(&mut self, pre: ((usize, usize, bool), Option<(usize, Token)>)) {
+    fn goback(&mut self, pre: ((usize, bool), Option<(usize, Token)>)) {
         // TODO: find better way
         self.scan.goback(pre.0);
         self.current = pre.1;

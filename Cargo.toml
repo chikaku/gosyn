@@ -15,3 +15,8 @@ strum = { version = "0.24.1", features = ["derive"] }
 
 [dev-dependencies]
 pprof = { version = "0.11.0", features = ["flamegraph"] }
+criterion = "0.3"
+
+[[bench]]
+name = "scanner"
+harness = false
