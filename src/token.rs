@@ -227,7 +227,7 @@ impl Operator {
         }
     }
 
-    fn to_str(self) -> &'static str {
+    pub(crate) fn to_str(self) -> &'static str {
         self.into()
     }
 }
@@ -256,15 +256,6 @@ impl Token {
             Token::Keyword(word) => word.to_str().len(),
             Token::Comment(text) => text.len(),
             Token::Literal(_, value) => value.len(),
-        }
-    }
-
-    pub fn char_count(&self) -> usize {
-        match self {
-            Token::Operator(op) => op.to_str().len(),
-            Token::Keyword(word) => word.to_str().len(),
-            Token::Comment(text) => text.chars().count(),
-            Token::Literal(_, value) => value.chars().count(),
         }
     }
 

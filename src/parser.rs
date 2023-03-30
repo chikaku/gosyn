@@ -2396,6 +2396,7 @@ mod test {
         expr("call(a, b...)")?;
         expr("call(a, x.M()%99)")?;
         expr("call(a, b,)")?;
+        expr("call(1/* comment */)")?;
 
         expr("x.(int)")?;
         expr("x.(type)")?;

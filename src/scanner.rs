@@ -17,10 +17,9 @@ pub struct Scanner {
     semicolon: bool,
     lines: Vec<usize>,
 
+    source: String,
     path: Option<PathBuf>,
     chars: Vec<char>,
-
-    #[allow(unused)]
     indices: Vec<usize>,
 }
 
@@ -31,6 +30,7 @@ impl Scanner {
             source.char_indices().map(|(pos, ch)| (pos, ch)).unzip();
 
         Self {
+            source,
             indices,
             chars,
             ..Default::default()
@@ -50,6 +50,7 @@ impl Scanner {
 
         Ok(Self {
             path,
+            source,
             indices,
             chars,
             ..Default::default()
@@ -104,8 +105,11 @@ impl Scanner {
         self.chars.get(self.pos + skp).copied()
     }
 
-    fn next_nchar(&mut self, n: usize) -> String {
-        self.chars[self.pos..].iter().take(n).collect::<String>()
+    fn next_nstr(&mut self, n: usize) -> &str {
+        let start = self.indices[self.pos];
+        let end = (start + n).min(self.source.len());
+        let part = &self.source.as_bytes()[start..end];
+        unsafe { std::str::from_utf8_unchecked(part) }
     }
 
     #[rustfmt::skip]
@@ -181,9 +185,9 @@ impl Scanner {
         }
 
         let current = self.pos;
-        let tok = self.scan_token()?;
+        let (tok, char_count) = self.scan_token()?;
         self.add_token_cross_line(&tok);
-        self.pos += tok.char_count();
+        self.pos += char_count;
         self.semicolon = self.try_insert_semicolon2(&tok);
         Ok(Some((current, tok)))
     }
@@ -202,17 +206,29 @@ impl Scanner {
     }
 
     /// return next Token
-    pub(crate) fn scan_token(&mut self) -> Result<Token> {
-        if let Ok(op) = Operator::from_str(&self.next_nchar(3)) {
-            return Ok(op.into());
+    pub(crate) fn scan_token(&mut self) -> Result<(Token, usize)> {
+        if let Ok(op) = Operator::from_str(self.next_nstr(3)) {
+            let char_count = op.to_str().len();
+            return Ok((op.into(), char_count));
         }
 
-        if let Some(tok) = match self.next_nchar(2).as_str() {
-            "//" => Some(Token::Comment(self.scan_line_comment())),
-            "/*" => Some(Token::Comment(self.scan_general_comment()?)),
-            two => Operator::from_str(two).ok().map(|op| op.into()),
+        if let Some(tok_cnt) = match self.next_nstr(2) {
+            "//" => {
+                let comment = self.scan_line_comment();
+                let char_count = comment.len();
+                Some((Token::Comment(comment.iter().collect()), char_count))
+            }
+            "/*" => {
+                let comment = self.scan_general_comment()?;
+                let char_count = comment.len();
+                Some((Token::Comment(comment.iter().collect()), char_count))
+            }
+            two => Operator::from_str(two).ok().map(|op| {
+                let char_count = op.to_str().len();
+                (op.into(), char_count)
+            }),
         } {
-            return Ok(tok);
+            return Ok(tok_cnt);
         }
 
         // caller make sure here is at least one character
@@ -223,64 +239,87 @@ impl Scanner {
         Ok(match next0_char {
             c if is_decimal_digit(c) => self.scan_lit_number()?,
             '.' if next1_is_digits => self.scan_lit_number()?,
-            '\'' => Token::Literal(
-                LitKind::Char,
-                self.scan_lit_rune().map(|lits| lits.iter().collect())?,
-            ),
-            '"' | '`' => Token::Literal(LitKind::String, self.scan_lit_string()?),
+            '\'' => {
+                let runes = self.scan_lit_rune()?;
+                let char_count = runes.len();
+                let runes = runes.iter().collect();
+
+                (Token::Literal(LitKind::Char, runes), char_count)
+            }
+            '"' | '`' => {
+                let litstr = self.scan_lit_string()?;
+                let char_count = litstr.len();
+                let litstr = litstr.iter().collect();
+                (Token::Literal(LitKind::String, litstr), char_count)
+            }
             ch if is_letter(ch) => {
                 let identifier = self.scan_identifier();
-                match Keyword::from_str(&identifier) {
+                let char_count = identifier.len();
+                let identifier = identifier.iter().collect::<String>();
+                let tok = match Keyword::from_str(identifier.as_str()) {
                     Ok(word) => Token::Keyword(word),
                     _ => Token::Literal(LitKind::Ident, identifier),
-                }
+                };
+
+                (tok, char_count)
             }
             other => match next0_char_op {
-                Some(op) => op.into(),
+                Some(op) => (op.into(), op.to_str().len()),
                 _ => return Err(self.error(format!("unresolved character {other:?}"))),
             },
         })
     }
 
     /// Scan line comment from `//` to `\n`
-    fn scan_line_comment(&mut self) -> String {
-        self.chars[self.pos..]
-            .iter()
-            .take_while(|&&ch| ch != '\n')
-            .collect()
+    fn scan_line_comment(&mut self) -> &[char] {
+        let start = self.pos;
+        let mut end = start;
+        while let Some(ch) = self.chars.get(end) {
+            if ch == &'\n' {
+                break;
+            }
+            end += 1;
+        }
+
+        &self.chars[start..end]
     }
 
     /// Scan general comment from `/*` to `*/`
-    fn scan_general_comment(&mut self) -> Result<String> {
+    fn scan_general_comment(&mut self) -> Result<&[char]> {
         let chars = &self.chars;
         assert_eq!(chars[self.pos], '/');
         assert_eq!(chars[self.pos + 1], '*');
 
-        let mut index = self.pos + 2;
-        while index < chars.len() - 1 {
-            if chars[index] == '*' && chars[index + 1] == '/' {
-                break;
-            }
-            index += 1;
+        let start = self.pos;
+        let mut end = start + 2;
+        let mut happy_endding = false;
+        while end < chars.len() - 1 && !happy_endding {
+            happy_endding = chars[end] == '*' && chars[end + 1] == '/';
+            end += 1;
         }
 
-        // index is index of '*'
-        let end = (index + 2).min(chars.len());
-        let result = chars[self.pos..end].iter().collect::<String>();
-        match result.len() >= 4 && result.ends_with("*/") {
-            true => Ok(result),
-            false => Err(self.error("comment no termination '*/'")),
+        if happy_endding {
+            let end = (end + 1).min(chars.len());
+            return Ok(&self.chars[start..end]);
         }
+
+        Err(self.error("comment no termination '*/'"))
     }
 
     /// scan an identifier
     /// caller must ensure that the first character is a unicode letter
     /// caller should check if identify is a keyword
-    fn scan_identifier(&mut self) -> String {
-        self.chars[self.pos..]
-            .iter()
-            .take_while(|&&ch| is_letter(ch) || is_unicode_digit(ch))
-            .collect()
+    fn scan_identifier(&mut self) -> &[char] {
+        let start = self.pos;
+        let mut end = start;
+        while let Some(&ch) = self.chars.get(end) {
+            if !is_letter(ch) && !is_unicode_digit(ch) {
+                break;
+            }
+            end += 1;
+        }
+
+        &self.chars[start..end]
     }
 
     fn scan_rune(&mut self, start_at: usize) -> Result<Vec<char>> {
@@ -354,7 +393,7 @@ impl Scanner {
         }
     }
 
-    fn scan_lit_string(&mut self) -> Result<String> {
+    fn scan_lit_string(&mut self) -> Result<Vec<char>> {
         let mut result = vec![];
         let quote = self.chars[self.pos];
         result.push(quote);
@@ -382,7 +421,7 @@ impl Scanner {
         }
 
         if result.len() >= 2 && result.last() == Some(&quote) {
-            return Ok(result.iter().collect());
+            return Ok(result);
         }
 
         let offset = self.pos + result.len();
@@ -413,12 +452,12 @@ impl Scanner {
         }
     }
 
-    fn scan_lit_number(&mut self) -> Result<Token> {
+    fn scan_lit_number(&mut self) -> Result<(Token, usize)> {
         // integer part
         let (radix, mut numlit) = match self.next_char(0) {
             Some('.') | None => (10, String::new()),
             Some(_) => {
-                let next2 = self.next_nchar(2);
+                let next2 = String::from(self.next_nstr(2));
                 match next2.as_str() {
                     "0b" | "oB" => (2, self.scan_digits(2, next2, is_binary_digit)),
                     "0o" | "0O" => (8, self.scan_digits(2, next2, is_decimal_digit)),
@@ -507,13 +546,13 @@ impl Scanner {
             ));
         }
 
-        let skipped = numlit.len();
-        if self.next_char(skipped) == Some('i') {
-            Ok(Token::Literal(LitKind::Imag, numlit + "i"))
+        let char_count = numlit.len();
+        if self.next_char(char_count) == Some('i') {
+            Ok((Token::Literal(LitKind::Imag, numlit + "i"), char_count + 1))
         } else if numlit.find('.').is_some() {
-            Ok(Token::Literal(LitKind::Float, numlit))
+            Ok((Token::Literal(LitKind::Float, numlit), char_count))
         } else {
-            Ok(Token::Literal(LitKind::Integer, numlit))
+            Ok((Token::Literal(LitKind::Integer, numlit), char_count))
         }
     }
 }
@@ -619,8 +658,8 @@ mod tests {
     fn scan_lit_number() {
         let numeric = |s: &str| {
             let mut sc = Scanner::from(s);
-            let n = sc.scan_lit_number()?;
-            if n.str_len() != s.len() {
+            let (n, size) = sc.scan_lit_number()?;
+            if size != s.len() {
                 return Err(sc.error("scan not finished"));
             }
             Ok(n)
