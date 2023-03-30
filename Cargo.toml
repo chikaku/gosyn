@@ -20,3 +20,7 @@ criterion = "0.3"
 [[bench]]
 name = "scanner"
 harness = false
+
+[[bench]]
+name = "parser"
+harness = false
