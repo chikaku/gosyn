@@ -375,7 +375,7 @@ pub struct CaseClause {
     pub tok: Keyword,
     pub pos: (usize, usize),
     pub list: Vec<Expression>,
-    pub body: Vec<Box<Statement>>,
+    pub body: Box<Vec<Statement>>,
 }
 
 #[derive(Debug)]
@@ -412,7 +412,7 @@ pub struct CommClause {
     pub pos: (usize, usize), // pos of (keyword, colon)
     pub tok: Keyword,
     pub comm: Option<Box<Statement>>,
-    pub body: Vec<Box<Statement>>,
+    pub body: Box<Vec<Statement>>,
 }
 
 #[derive(Debug)]

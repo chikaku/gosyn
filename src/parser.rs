@@ -16,8 +16,7 @@ pub struct Parser {
     comments: Vec<Rc<ast::Comment>>, // all comments
     lead_comments: Vec<Rc<ast::Comment>>,
     current: Option<(usize, Token)>,
-    // TODO: add an tok field without pos
-    // treat None as token::None
+    prev_pos: (usize, bool), // save previous token position for rollback
 }
 
 impl Parser {
@@ -134,17 +133,17 @@ impl Parser {
         }
     }
 
-    fn preback(&self) -> ((usize, bool), Option<(usize, Token)>) {
-        (self.scan.preback(), self.current.clone())
+    fn preback(&self) -> (usize, bool) {
+        self.prev_pos
     }
 
-    fn goback(&mut self, pre: ((usize, bool), Option<(usize, Token)>)) {
-        // TODO: find better way
-        self.scan.goback(pre.0);
-        self.current = pre.1;
+    fn goback(&mut self, prev: (usize, bool)) {
+        self.scan.goback(prev);
+        self.current = self.scan_next().unwrap();
     }
 
     fn scan_next(&mut self) -> Result<Option<(usize, Token)>> {
+        self.prev_pos = self.scan.preback();
         self.scan.next_token()
     }
 
@@ -1340,12 +1339,12 @@ impl Parser {
             match self.current_kind() {
                 TokenKind::Operator(Operator::ParenRight) => {
                     // Type1, Type2) | Type1, Type2,)
-                    return Ok(id_list.into_iter().map(Into::into).collect());
+                    return Ok(id_list.into_iter().map(|id| id.into()).collect());
                 }
                 TokenKind::Operator(Operator::BarackLeft) => {
                     if end_with_comma {
                         // a, b, []
-                        let mut list = id_list.into_iter().map(Into::into).collect::<Vec<_>>();
+                        let mut list = id_list.into_iter().map(|id| id.into()).collect::<Vec<_>>();
                         list.push(self.type_()?.into());
                         return Ok(list);
                     }
@@ -1357,7 +1356,8 @@ impl Parser {
                             typ.left = Box::new(ast::Expression::Ident(id));
                             let typ = ast::Expression::Index(typ);
 
-                            let mut list = id_list.into_iter().map(Into::into).collect::<Vec<_>>();
+                            let mut list =
+                                id_list.into_iter().map(|id| id.into()).collect::<Vec<_>>();
                             list.push(typ.into());
                             return Ok(list);
                         }
@@ -1375,7 +1375,7 @@ impl Parser {
                         let elt = Some(Box::new(self.type_()?));
                         let typ = ast::Expression::Ellipsis(ast::Ellipsis { pos, elt });
 
-                        let mut list = id_list.into_iter().map(Into::into).collect::<Vec<_>>();
+                        let mut list = id_list.into_iter().map(|id| id.into()).collect::<Vec<_>>();
                         list.push(typ.into());
                         return Ok(list);
                     }
@@ -1892,7 +1892,7 @@ impl Parser {
             };
 
             let pos = (pos, self.expect(Operator::Colon)?);
-            let body_ = self.parse_stmt_list()?.into_iter().map(Box::new).collect();
+            let body_ = Box::new(self.parse_stmt_list()?);
             body.push(ast::CaseClause { tok, pos, list, body: body_ });
         }
 
@@ -1979,7 +1979,7 @@ impl Parser {
             };
 
             let pos = (pos, self.expect(Operator::Colon)?);
-            let body_ = self.parse_stmt_list()?.into_iter().map(Box::new).collect();
+            let body_ = Box::new(self.parse_stmt_list()?);
             body.push(ast::CommClause { pos, tok, comm, body: body_ });
         }
 
