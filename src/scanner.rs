@@ -3,12 +3,13 @@ use crate::token::LitKind;
 use crate::token::Operator;
 use crate::token::Token;
 use crate::Error;
-use crate::Result;
 
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
+
+use anyhow::Result;
 use unic_ucd_category::GeneralCategory;
 
 #[derive(Default)]
@@ -18,18 +19,20 @@ pub struct Scanner {
     lines: Vec<usize>,
 
     source: String,
-    path: Option<PathBuf>,
+    path: PathBuf,
     chars: Vec<char>,
     indices: Vec<usize>,
 }
 
 impl Scanner {
     pub(crate) fn from<S: AsRef<str>>(s: S) -> Self {
+        let path = "<input>".into();
         let source = s.as_ref().to_string();
         let (indices, chars): (Vec<_>, Vec<_>) =
             source.char_indices().map(|(pos, ch)| (pos, ch)).unzip();
 
         Self {
+            path,
             source,
             indices,
             chars,
@@ -44,7 +47,7 @@ impl Scanner {
             source = source.split_off(BOM.len());
         }
 
-        let path = Some(path.as_ref().into());
+        let path = path.as_ref().into();
         let (indices, chars): (Vec<_>, Vec<_>) =
             source.char_indices().map(|(pos, ch)| (pos, ch)).unzip();
 
@@ -57,7 +60,7 @@ impl Scanner {
         })
     }
 
-    pub(crate) fn path(&self) -> Option<PathBuf> {
+    pub(crate) fn path(&self) -> PathBuf {
         self.path.clone()
     }
 
@@ -89,16 +92,17 @@ impl Scanner {
         self.lines.push(line_start);
     }
 
-    fn error<S: AsRef<str>>(&self, reason: S) -> Error {
+    fn error<S: AsRef<str>>(&self, reason: S) -> anyhow::Error {
         self.error_at(self.pos, reason)
     }
 
-    fn error_at<S: AsRef<str>>(&self, pos: usize, reason: S) -> Error {
+    fn error_at<S: AsRef<str>>(&self, pos: usize, reason: S) -> anyhow::Error {
         Error::Else {
             path: self.path(),
             location: self.line_info(pos),
             reason: reason.as_ref().into(),
         }
+        .into()
     }
 
     fn next_char(&mut self, skp: usize) -> Option<char> {

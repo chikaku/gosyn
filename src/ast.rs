@@ -481,7 +481,7 @@ pub struct Import {
 
 #[derive(Default, Debug)]
 pub struct File {
-    pub path: Option<PathBuf>,
+    pub path: PathBuf,
     pub line_info: Vec<usize>,
     pub docs: Vec<Rc<Comment>>,
     pub pkg_name: Ident,

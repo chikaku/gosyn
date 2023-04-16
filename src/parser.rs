@@ -3,10 +3,11 @@ use crate::ast::{ChanMode, ChannelType};
 use crate::scanner::Scanner;
 use crate::token::{Keyword, LitKind, Operator, Token, TokenKind};
 use crate::Error;
-use crate::Result;
 
 use std::path::Path;
 use std::rc::Rc;
+
+use anyhow::Result;
 
 #[derive(Default)]
 pub struct Parser {
@@ -44,7 +45,7 @@ impl Parser {
 }
 
 impl Parser {
-    fn unexpected<K>(&self, expect: &[K], actual: Option<(usize, Token)>) -> Error
+    fn unexpected<K>(&self, expect: &[K], actual: Option<(usize, Token)>) -> anyhow::Error
     where
         K: Into<TokenKind> + Copy,
     {
@@ -59,17 +60,19 @@ impl Parser {
             path: self.scan.path(),
             location: self.scan.line_info(pos),
         }
+        .into()
     }
 
-    fn else_error_at<S: AsRef<str>>(&self, pos: usize, reason: S) -> Error {
+    fn else_error_at<S: AsRef<str>>(&self, pos: usize, reason: S) -> anyhow::Error {
         Error::Else {
             path: self.scan.path(),
             location: self.scan.line_info(pos),
             reason: reason.as_ref().to_string(),
         }
+        .into()
     }
 
-    fn else_error<S: AsRef<str>>(&self, reason: S) -> Error {
+    fn else_error<S: AsRef<str>>(&self, reason: S) -> anyhow::Error {
         self.else_error_at(self.scan.position(), reason)
     }
 
@@ -2205,7 +2208,8 @@ fn is_type_elem(expr: &ast::Expression) -> bool {
 mod test {
     use crate::ast::Declaration;
     use crate::parser::Parser;
-    use crate::Result;
+
+    use anyhow::Result;
 
     #[test]
     fn parse_package() -> Result<()> {

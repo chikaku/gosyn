@@ -3,7 +3,6 @@ use walkdir::Walkdir;
 
 use gosyn::parse_dir;
 use gosyn::Parser;
-use gosyn::Result;
 
 use std::env;
 use std::fs;
@@ -11,7 +10,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-fn parse_source<P: AsRef<Path>>(path: P) -> Result<Duration> {
+fn parse_source<P: AsRef<Path>>(path: P) -> anyhow::Result<Duration> {
     let clock = Instant::now();
     Parser::from_file(path)?
         .parse_file()
@@ -19,7 +18,7 @@ fn parse_source<P: AsRef<Path>>(path: P) -> Result<Duration> {
 }
 
 #[test]
-fn pprof_parser() -> Result<()> {
+fn pprof_parser() -> anyhow::Result<()> {
     let dir = match env::var("GOSYN_PPROF_TEST") {
         Ok(path) => path,
         _ => return Ok(()),
@@ -45,11 +44,11 @@ fn pprof_parser() -> Result<()> {
 }
 
 #[test]
-fn test_third_party_projects() -> Result<()> {
+fn test_third_party_projects() -> anyhow::Result<()> {
     match env::var("GOSYN_THIRD_PARTY") {
         Ok(val) => val
             .split(";")
-            .map(|dir| -> Result<()> {
+            .map(|dir| -> anyhow::Result<()> {
                 let mut walk = Walkdir::new(dir)?.with_ext([".go"], [".pb.go"])?;
                 println!("parsing {} ...", dir);
                 while let Some(path) = walk.next()? {
@@ -67,7 +66,7 @@ fn test_third_party_projects() -> Result<()> {
 }
 
 #[test]
-fn test_parse_directory() -> Result<()> {
+fn test_parse_directory() -> anyhow::Result<()> {
     let root = match env::var("GOSYN_TEST_DIR") {
         Ok(dir) => PathBuf::from(dir),
         _ => return Ok(()),
