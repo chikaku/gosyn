@@ -3,7 +3,13 @@
 package testdata
 
 // docs for type declaration
-type empty struct{}
+type empty struct {
+	// docs for field
+	Age int
+	// docs for field
+	// Name is a name
+	Name string
+}
 
 // comments...
 

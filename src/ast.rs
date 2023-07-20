@@ -53,6 +53,7 @@ pub struct Field {
     pub name: Vec<Ident>,
     pub typ: Expression,
     pub tag: Option<StringLit>,
+    pub comments: Vec<Rc<Comment>>,
 }
 
 #[derive(Default, Debug)]
@@ -504,6 +505,7 @@ impl From<Ident> for Field {
             name: vec![],
             typ: Expression::Ident(id),
             tag: None,
+            comments: Default::default(),
         }
     }
 }
@@ -521,6 +523,7 @@ impl From<Expression> for Field {
             name: vec![],
             typ: expr,
             tag: None,
+            comments: Default::default(),
         }
     }
 }
