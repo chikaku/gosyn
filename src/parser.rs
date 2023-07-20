@@ -664,6 +664,7 @@ impl Parser {
                 name: self.identifier_list(None)?,
                 typ: self.parse_type_elem()?,
                 tag: None,
+                comments: Default::default(),
             });
 
             extra_comma = self.skipped(Operator::Comma)?;
@@ -698,7 +699,9 @@ impl Parser {
 
         let mut fields = vec![];
         while !self.current_is(Operator::BraceRight) {
-            fields.push(self.field_decl()?);
+            let mut field = self.field_decl()?;
+            field.comments.extend(self.lead_comments.drain(0..));
+            fields.push(field);
             self.skipped(Operator::SemiColon)?;
         }
 
@@ -718,7 +721,12 @@ impl Parser {
                     )) => {
                         let typ = self.qualified_ident(Some(name))?;
                         let tag = self.string_literal_or_none()?;
-                        Ok(ast::Field { name: vec![], typ, tag })
+                        Ok(ast::Field {
+                            name: vec![],
+                            typ,
+                            tag,
+                            comments: Default::default(),
+                        })
                     }
                     _ => {
                         let mut name = self.identifier_list(Some(name))?;
@@ -730,7 +738,12 @@ impl Parser {
                                 typ.left = Box::new(ast::Expression::Ident(name));
                                 let tag = self.string_literal_or_none()?;
                                 let typ = ast::Expression::Index(typ);
-                                return Ok(ast::Field { name: vec![], typ, tag });
+                                return Ok(ast::Field {
+                                    name: vec![],
+                                    typ,
+                                    tag,
+                                    comments: Default::default(),
+                                });
                             }
                             typ
                         } else {
@@ -738,7 +751,12 @@ impl Parser {
                         };
 
                         let tag = self.string_literal_or_none()?;
-                        Ok(ast::Field { name, typ, tag })
+                        Ok(ast::Field {
+                            name,
+                            typ,
+                            tag,
+                            comments: Default::default(),
+                        })
                     }
                 }
             }
@@ -747,7 +765,12 @@ impl Parser {
                 self.next()?;
                 let typ = self.qualified_ident(None)?;
                 let tag = self.string_literal_or_none()?;
-                Ok(ast::Field { name: vec![], typ, tag })
+                Ok(ast::Field {
+                    name: vec![],
+                    typ,
+                    tag,
+                    comments: Default::default(),
+                })
             }
 
             _ => Err(self.else_error("expect field name or embeded field")),
@@ -776,6 +799,7 @@ impl Parser {
                 tag: None,
                 name: vec![],
                 typ: self.parse_type_elem()?,
+                comments: Default::default(),
             });
             if !self.current_is(Operator::BraceRight) {
                 self.expect(Operator::SemiColon)?;
@@ -809,6 +833,7 @@ impl Parser {
             tag: None,
             name: vec![id],
             typ: ast::Expression::TypeFunction(func),
+            comments: Default::default(),
         })
     }
 
@@ -1367,7 +1392,12 @@ impl Parser {
                         typ => {
                             // a, b [N]T
                             let name = id_list;
-                            return Ok(vec![ast::Field { name, typ, tag: None }]);
+                            return Ok(vec![ast::Field {
+                                name,
+                                typ,
+                                tag: None,
+                                comments: Default::default(),
+                            }]);
                         }
                     }
                 }
@@ -1393,7 +1423,12 @@ impl Parser {
                     let elt = Some(Box::new(self.type_()?));
                     let typ = ast::Ellipsis { pos, elt };
                     let typ = ast::Expression::Ellipsis(typ);
-                    return Ok(vec![ast::Field { name, typ, tag: None }]);
+                    return Ok(vec![ast::Field {
+                        name,
+                        typ,
+                        tag: None,
+                        comments: Default::default(),
+                    }]);
                 }
                 TokenKind::Operator(Operator::Dot) => {
                     if end_with_comma {
@@ -1423,7 +1458,12 @@ impl Parser {
                     // a, b Type
                     let typ = self.parse_type_elem()?;
                     let name = id_list;
-                    return Ok(vec![ast::Field { name, typ, tag: None }]);
+                    return Ok(vec![ast::Field {
+                        name,
+                        typ,
+                        tag: None,
+                        comments: Default::default(),
+                    }]);
                 }
             }
         }
@@ -2206,7 +2246,7 @@ fn is_type_elem(expr: &ast::Expression) -> bool {
 
 #[cfg(test)]
 mod test {
-    use crate::ast::Declaration;
+    use crate::ast::{Declaration, Expression};
     use crate::parser::Parser;
 
     use anyhow::Result;
@@ -2679,7 +2719,15 @@ mod test {
                 Declaration::Function(x) => assert_eq!(x.docs.len(), 2),
                 Declaration::Type(x) => {
                     assert_eq!(x.docs.len(), 0);
-                    assert_eq!(x.specs[0].docs.len(), 1)
+                    assert_eq!(x.specs[0].docs.len(), 1);
+
+                    match &x.specs[0].typ {
+                        Expression::TypeStruct(x) => {
+                            assert_eq!(x.fields[0].comments.len(), 1);
+                            assert_eq!(x.fields[1].comments.len(), 2);
+                        }
+                        _ => continue,
+                    }
                 }
                 Declaration::Variable(x) => {
                     assert_eq!(x.docs.len(), 3);
