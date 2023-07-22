@@ -12,8 +12,8 @@ license = "MIT"
 [dependencies]
 anyhow = "1.0"
 unic-ucd-category = "0.9.0"
-strum = { version = "0.24.1", features = ["derive"] }
-thiserror = "1.0.40"
+strum = { version = "0.25.0", features = ["derive"] }
+thiserror = "1.0.44"
 
 [dev-dependencies]
 pprof = { version = "0.11.0", features = ["flamegraph"] }
