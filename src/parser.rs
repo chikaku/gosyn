@@ -166,12 +166,54 @@ impl Parser {
             pos_tok = self.scan_next()?;
         }
 
+        if let Some(comment) = self.lead_comments.last() {
+            let line0 = self.scan.line_info(comment.pos).0;
+            if let Some((pos, _)) = &pos_tok {
+                let line1 = self.scan.line_info(*pos).0;
+                if line1 > line0 + 1 {
+                    self.lead_comments.clear();
+                }
+            }
+        }
+
         self.current = pos_tok;
         Ok(self.current.as_ref())
     }
 
     fn drain_comments(&mut self) -> Vec<Rc<ast::Comment>> {
         self.lead_comments.drain(0..).collect()
+    }
+
+    fn line_end_comment(&mut self) -> Result<Option<Rc<ast::Comment>>> {
+        let pos = self.current_pos();
+        let (line0, _) = self.scan.line_info(pos);
+
+        let start = self.preback();
+        if !self.current_is(Operator::SemiColon) {
+            return Ok(None);
+        }
+
+        Ok(match self.scan_next()? {
+            None => None,
+            Some((pos, Token::Comment(text))) => {
+                self.lead_comments.clear();
+                let (line1, _) = self.scan.line_info(pos);
+                if line0 == line1 {
+                    self.next()?;
+                    Some(Rc::new(ast::Comment { pos, text }))
+                } else {
+                    self.goback(start);
+                    self.next()?;
+                    None
+                }
+            }
+            _ => {
+                self.lead_comments.clear();
+                self.goback(start);
+                self.next()?;
+                None
+            }
+        })
     }
 }
 
@@ -700,7 +742,10 @@ impl Parser {
         let mut fields = vec![];
         while !self.current_is(Operator::BraceRight) {
             let mut field = self.field_decl()?;
-            field.comments.extend(self.lead_comments.drain(0..));
+            if let Some(comment) = self.line_end_comment()? {
+                field.comments.push(comment);
+            }
+
             fields.push(field);
             self.skipped(Operator::SemiColon)?;
         }
@@ -721,12 +766,8 @@ impl Parser {
                     )) => {
                         let typ = self.qualified_ident(Some(name))?;
                         let tag = self.string_literal_or_none()?;
-                        Ok(ast::Field {
-                            name: vec![],
-                            typ,
-                            tag,
-                            comments: Default::default(),
-                        })
+                        let comments = self.drain_comments();
+                        Ok(ast::Field { name: vec![], typ, tag, comments })
                     }
                     _ => {
                         let mut name = self.identifier_list(Some(name))?;
@@ -738,12 +779,8 @@ impl Parser {
                                 typ.left = Box::new(ast::Expression::Ident(name));
                                 let tag = self.string_literal_or_none()?;
                                 let typ = ast::Expression::Index(typ);
-                                return Ok(ast::Field {
-                                    name: vec![],
-                                    typ,
-                                    tag,
-                                    comments: Default::default(),
-                                });
+                                let comments = self.drain_comments();
+                                return Ok(ast::Field { name: vec![], typ, tag, comments });
                             }
                             typ
                         } else {
@@ -751,12 +788,8 @@ impl Parser {
                         };
 
                         let tag = self.string_literal_or_none()?;
-                        Ok(ast::Field {
-                            name,
-                            typ,
-                            tag,
-                            comments: Default::default(),
-                        })
+                        let comments = self.drain_comments();
+                        Ok(ast::Field { name, typ, tag, comments })
                     }
                 }
             }
@@ -765,12 +798,8 @@ impl Parser {
                 self.next()?;
                 let typ = self.qualified_ident(None)?;
                 let tag = self.string_literal_or_none()?;
-                Ok(ast::Field {
-                    name: vec![],
-                    typ,
-                    tag,
-                    comments: Default::default(),
-                })
+                let comments = self.drain_comments();
+                Ok(ast::Field { name: vec![], typ, tag, comments })
             }
 
             _ => Err(self.else_error("expect field name or embeded field")),
@@ -2725,6 +2754,10 @@ mod test {
                         Expression::TypeStruct(x) => {
                             assert_eq!(x.fields[0].comments.len(), 1);
                             assert_eq!(x.fields[1].comments.len(), 2);
+                            assert_eq!(x.fields[2].comments.len(), 1);
+                            assert_eq!(x.fields[3].comments.len(), 3);
+                            assert_eq!(x.fields[4].comments.len(), 2);
+                            assert_eq!(x.fields[5].comments.len(), 0);
                         }
                         _ => continue,
                     }
