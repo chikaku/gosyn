@@ -8,13 +8,13 @@ use std::fmt::Debug;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Comment {
     pub pos: usize,
     pub text: String,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct Ident {
     pub pos: usize,
     pub name: String,
@@ -22,33 +22,33 @@ pub struct Ident {
 
 // ================ Type Definition ================
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PointerType {
     pub pos: usize,
     pub typ: Box<Expression>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ArrayType {
     pub pos: (usize, usize),
     pub len: Box<Expression>,
     pub typ: Box<Expression>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SliceType {
     pub pos: (usize, usize),
     pub typ: Box<Expression>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MapType {
     pub pos: (usize, usize),
     pub key: Box<Expression>,
     pub val: Box<Expression>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Field {
     pub name: Vec<Ident>,
     pub typ: Expression,
@@ -56,19 +56,19 @@ pub struct Field {
     pub comments: Vec<Rc<Comment>>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct FieldList {
     pub pos: Option<(usize, usize)>,
     pub list: Vec<Field>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StructType {
     pub pos: (usize, usize),
     pub fields: Vec<Field>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct FuncType {
     pub pos: usize,
     pub typ_params: FieldList,
@@ -76,20 +76,20 @@ pub struct FuncType {
     pub result: FieldList,
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum ChanMode {
     Send,
     Recv,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ChannelType {
     pub pos: (usize, usize), // chan, <-
     pub dir: Option<ChanMode>,
     pub typ: Box<Expression>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InterfaceType {
     pub pos: usize,
     pub methods: FieldList,
@@ -97,85 +97,85 @@ pub struct InterfaceType {
 
 // ================ Expression Definition ================
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BasicLit {
     pub pos: usize,
     pub kind: LitKind,
     pub value: String,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct StringLit {
     pub pos: usize,
     pub value: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FuncLit {
     pub typ: FuncType,
     pub body: BlockStmt,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Element {
     Expr(Expression),
     LitValue(LiteralValue),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct KeyedElement {
     pub key: Option<Element>,
     pub val: Element,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LiteralValue {
     pub pos: (usize, usize),
     pub values: Vec<KeyedElement>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CompositeLit {
     pub typ: Box<Expression>,
     pub val: LiteralValue,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Selector {
     pub pos: usize,
     pub x: Box<Expression>,
     pub sel: Ident,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TypeAssertion {
     pub pos: (usize, usize),
     pub left: Box<Expression>,
     pub right: Option<Box<Expression>>, // None for x.(type)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Index {
     pub pos: (usize, usize),
     pub left: Box<Expression>,
     pub index: Box<Expression>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IndexList {
     pub pos: (usize, usize),
     pub left: Box<Expression>,
     pub indices: Vec<Expression>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Slice {
     pub pos: (usize, usize),
     pub left: Box<Expression>,
     pub index: [Option<Box<Expression>>; 3],
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Call {
     pub pos: (usize, usize), // third pos > 0 means the ellipsis argument
     pub args: Vec<Expression>,
@@ -183,31 +183,31 @@ pub struct Call {
     pub dots: Option<usize>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ParenExpression {
     pub pos: (usize, usize),
     pub expr: Box<Expression>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StarExpression {
     pub pos: usize,
     pub right: Box<Expression>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Ellipsis {
     pub pos: usize,
     pub elt: Option<Box<Expression>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RangeExpr {
     pub pos: usize, // pos of 'range'
     pub right: Box<Expression>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Operation {
     pub pos: usize,
     pub op: Operator,
@@ -215,6 +215,7 @@ pub struct Operation {
     pub y: Option<Box<Expression>>,
 }
 
+#[derive(Clone)]
 pub enum Expression {
     Call(Call),
     Index(Index),
@@ -244,7 +245,7 @@ pub enum Expression {
 
 // ================ Declaration Definition ================
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Decl<T> {
     pub docs: Vec<Rc<Comment>>,
     pub pos0: usize,                  // pos of var | const | type
@@ -252,7 +253,7 @@ pub struct Decl<T> {
     pub specs: Vec<T>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct VarSpec {
     pub docs: Vec<Rc<Comment>>,
     pub name: Vec<Ident>,
@@ -260,7 +261,7 @@ pub struct VarSpec {
     pub values: Vec<Expression>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct ConstSpec {
     pub docs: Vec<Rc<Comment>>,
     pub name: Vec<Ident>,
@@ -268,7 +269,7 @@ pub struct ConstSpec {
     pub values: Vec<Expression>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TypeSpec {
     pub docs: Vec<Rc<Comment>>,
     pub alias: bool,
@@ -277,7 +278,7 @@ pub struct TypeSpec {
     pub typ: Expression,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FuncDecl {
     pub docs: Vec<Rc<Comment>>,
     pub recv: Option<FieldList>,
@@ -286,7 +287,7 @@ pub struct FuncDecl {
     pub body: Option<BlockStmt>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Declaration {
     Function(FuncDecl),
     Type(Decl<TypeSpec>),
@@ -296,45 +297,45 @@ pub enum Declaration {
 
 // ================ Statement Definition ================
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BlockStmt {
     pub pos: (usize, usize),
     pub list: Vec<Statement>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum DeclStmt {
     Type(Decl<TypeSpec>),
     Const(Decl<ConstSpec>),
     Variable(Decl<VarSpec>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GoStmt {
     pub pos: usize,
     pub call: Call,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DeferStmt {
     pub pos: usize,
     pub call: Call,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ReturnStmt {
     pub pos: usize,
     pub ret: Vec<Expression>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BranchStmt {
     pub pos: usize,
     pub key: Keyword,
     pub ident: Option<Ident>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IfStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
@@ -343,7 +344,7 @@ pub struct IfStmt {
     pub else_: Option<Box<Statement>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AssignStmt {
     // position of assign operator like = | += | &=
     pub pos: usize,
@@ -352,26 +353,26 @@ pub struct AssignStmt {
     pub right: Vec<Expression>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LabeledStmt {
     pub pos: usize,
     pub name: Ident,
     pub stmt: Box<Statement>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SendStmt {
     pub pos: usize,
     pub chan: Expression,
     pub value: Expression,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ExprStmt {
     pub expr: Expression,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CaseClause {
     pub tok: Keyword,
     pub pos: (usize, usize),
@@ -379,13 +380,13 @@ pub struct CaseClause {
     pub body: Box<Vec<Statement>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CaseBlock {
     pub pos: (usize, usize),
     pub body: Vec<CaseClause>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SwitchStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
@@ -393,7 +394,7 @@ pub struct SwitchStmt {
     pub block: CaseBlock,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TypeSwitchStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
@@ -401,14 +402,14 @@ pub struct TypeSwitchStmt {
     pub block: CaseBlock,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IncDecStmt {
     pub pos: usize,
     pub op: Operator,
     pub expr: Expression,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CommClause {
     pub pos: (usize, usize), // pos of (keyword, colon)
     pub tok: Keyword,
@@ -416,19 +417,19 @@ pub struct CommClause {
     pub body: Box<Vec<Statement>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CommBlock {
     pub pos: (usize, usize),
     pub body: Vec<CommClause>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SelectStmt {
     pub pos: usize,
     pub body: CommBlock,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RangeStmt {
     pub pos: (usize, usize), // pos of (for, range)
     pub key: Option<Expression>,
@@ -438,7 +439,7 @@ pub struct RangeStmt {
     pub body: BlockStmt,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ForStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
@@ -447,12 +448,13 @@ pub struct ForStmt {
     pub body: BlockStmt,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EmptyStmt {
     pub pos: usize,
 }
 
 #[allow(clippy::large_enum_variant)]
+#[derive(Clone)]
 pub enum Statement {
     Go(GoStmt),
     If(IfStmt),
@@ -474,13 +476,13 @@ pub enum Statement {
     Declaration(DeclStmt),
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct Import {
     pub name: Option<Ident>,
     pub path: StringLit,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct File {
     pub path: PathBuf,
     pub line_info: Vec<usize>,
@@ -491,7 +493,7 @@ pub struct File {
     pub comments: Vec<Rc<Comment>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Package {
     pub path: PathBuf,
     pub files: Vec<File>,
