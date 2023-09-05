@@ -1911,19 +1911,17 @@ impl Parser {
         self.expr_level = -1;
 
         if self.current_not(Operator::BraceLeft) {
-            tag = self
-                .current_not(Operator::SemiColon)
-                .then(|| self.parse_simple_stmt())
-                .map_or(Ok(None), |r| r.map(Some))?;
-
-            if self.skipped(Operator::SemiColon)? {
-                init = tag;
+            if self.current_not(Operator::SemiColon) {
+                tag = Some(self.parse_simple_stmt()?);
             }
 
-            tag = self
-                .current_not(Operator::BraceLeft)
-                .then(|| self.parse_simple_stmt())
-                .map_or(Ok(None), |r| r.map(Some))?;
+            if self.skipped(Operator::SemiColon)? {
+                init = tag.take();
+            }
+
+            if self.current_not(Operator::BraceLeft) {
+                tag = Some(self.parse_simple_stmt()?);
+            }
         };
 
         self.expr_level = prev_level;
@@ -1931,20 +1929,17 @@ impl Parser {
         let type_assert = self.check_switch_type_assert(&tag)?;
         let block = self.parse_case_block(type_assert)?;
 
-        Ok(match type_assert {
-            true => {
-                let tag = tag.map(Box::new);
-                ast::Statement::TypeSwitch(ast::TypeSwitchStmt { pos, init, tag, block })
-            }
-            false => {
-                let tag = match tag {
-                    None => None,
-                    Some(ast::Statement::Expr(s)) => Some(s.expr),
-                    _ => return Err(self.else_error("switch tag must be an expression")),
-                };
+        Ok(if type_assert {
+            let tag = tag.map(Box::new);
+            ast::Statement::TypeSwitch(ast::TypeSwitchStmt { pos, init, tag, block })
+        } else {
+            let tag = match tag {
+                None => None,
+                Some(ast::Statement::Expr(s)) => Some(s.expr),
+                _ => return Err(self.else_error("switch tag must be an expression")),
+            };
 
-                ast::Statement::Switch(ast::SwitchStmt { pos, init, tag, block })
-            }
+            ast::Statement::Switch(ast::SwitchStmt { pos, init, tag, block })
         })
     }
 
@@ -2275,14 +2270,19 @@ fn is_type_elem(expr: &ast::Expression) -> bool {
 
 #[cfg(test)]
 mod test {
-    use crate::ast::{Declaration, Expression};
+    use crate::ast::{self, Declaration, Expression};
     use crate::parser::Parser;
 
-    use anyhow::Result;
+    use anyhow::{Ok, Result};
 
     #[test]
     fn parse_package() -> Result<()> {
-        let pkg = |s| Parser::from(s).parse_package();
+        let pkg = |s| {
+            let mut parser = Parser::from(s);
+            let pkg = parser.parse_package()?;
+            assert!(parser.next()?.is_none());
+            Ok(pkg)
+        };
 
         pkg("package main")?;
         pkg("package\n\nmain")?;
@@ -2297,7 +2297,12 @@ mod test {
 
     #[test]
     fn parse_imports() -> Result<()> {
-        let import = |s: &str| Parser::from(s).parse_import_decl();
+        let import = |s| {
+            let mut parser = Parser::from(s);
+            let imp = parser.parse_import_decl()?;
+            assert!(parser.next()?.is_none());
+            Ok(imp)
+        };
 
         import("import ()")?;
         import("import `aa`")?;
@@ -2316,7 +2321,12 @@ mod test {
 
     #[test]
     fn parse_decl() -> Result<()> {
-        let vars = |s| Parser::from(s).parse_decl(Parser::parse_var_spec);
+        let vars = |s| {
+            let mut parser = Parser::from(s);
+            let vars = parser.parse_decl(Parser::parse_var_spec)?;
+            assert!(parser.next()?.is_none());
+            Ok(vars)
+        };
 
         vars("var a int")?;
         vars("var a = 1")?;
@@ -2330,7 +2340,12 @@ mod test {
 
         assert!(vars("var a, b;").is_err());
 
-        let consts = |s| Parser::from(s).parse_decl(Parser::parse_const_spec);
+        let consts = |s| {
+            let mut parser = Parser::from(s);
+            let consts = parser.parse_decl(Parser::parse_const_spec)?;
+            assert!(parser.next()?.is_none());
+            Ok(consts)
+        };
 
         consts("const a = 1")?;
         consts("const a int64 = 1")?;
@@ -2345,55 +2360,113 @@ mod test {
 
     #[test]
     fn parse_func_decl() -> Result<()> {
-        let func = |s| Parser::from(s).parse_func_decl();
+        let func = |s, (none_recv, type_params_len, params_len, result_len)| {
+            let mut parser = Parser::from(s);
+            let func = parser.parse_func_decl()?;
+            assert!(parser.next()?.is_none());
 
-        func("func a()")?;
-        func("func a(x int) int")?;
-        func("func (S[T]) Bar()")?;
-        func("func min[P any]()")?;
-        func("func min[_ any]()")?;
-        func("func f() { go f1() }")?;
-        func("func f(n int) func(p *T)")?;
-        func("func h[T Ordered](a []T)")?;
-        func("func min[S ~[]E, E any]()")?;
-        func("func min[P Constraint[int]]()")?;
-        func("func f(a, _ int, z float32) bool")?;
-        func("func f(a, b int, z float32) (bool)")?;
-        func("func f(prefix string, values ...int)")?;
-        func("func min[](x, y T) T { return Min(x, y) }")?;
-        func("func min[S interface{ ~[]byte|string }]()")?;
-        func("func f(int, int, float64) (float64, *[]int)")?;
-        func("func (m *M) Print() { fmt.Print(m.message)}")?;
-        func("func f(int, int, float64) (*a, []b, map[c]d)")?;
-        func("func min[T any](x, y T) T { return Min(x, y) }")?;
-        func("func fn2() (int, *int, int) { return 0, nil, 0 }")?;
-        func("func a(w t1, r *t2, e chan<- t3) {x <- t4{c: c, t: t};}")?;
-        func("func min[T ~int|~float64](x, y T) T { return Min(x, y) }")?;
-        func("func (t *T) f(a *u) *s {return &t[(ptr(u.P(a))>>3)%size].root}")?;
-        func("func (s *SL[K, V]) It() M[K, V] { return &S[K, V]{a.b.c[0], nil} }")?;
+            assert_eq!(func.recv.as_ref().map(|_| ()), none_recv);
+            assert_eq!(func.typ.typ_params.list.len(), type_params_len);
 
-        assert!(func("func(...int").is_err());
-        assert!(func("func() (...int)").is_err());
-        assert!(func("func(a int, bool)").is_err());
-        assert!(func("func(int) (...bool, int)").is_err());
+            assert_eq!(func.typ.params.list.len(), params_len);
+            assert_eq!(func.typ.result.list.len(), result_len);
+
+            Ok(func)
+        };
+
+        func("func a()", (None, 0, 0, 0))?;
+        func("func a(x int) int", (None, 0, 1, 1))?;
+        func("func (S[T]) Bar()", (Some(()), 0, 0, 0))?;
+        func("func min[P any]()", (None, 1, 0, 0))?;
+        func("func min[_ any]()", (None, 1, 0, 0))?;
+        func("func f() { go f1() }", (None, 0, 0, 0))?;
+        func("func f(n int) func(p *T)", (None, 0, 1, 1))?;
+        func("func h[T Ordered](a []T)", (None, 1, 1, 0))?;
+        func("func min[S ~[]E, E any]()", (None, 2, 0, 0))?;
+        func("func min[P Constraint[int]]()", (None, 1, 0, 0))?;
+        func("func f(a, _ int, z float32) bool", (None, 0, 2, 1))?;
+        func("func f(a, b int, z float32) (bool)", (None, 0, 2, 1))?;
+        func("func f(prefix string, values ...int)", (None, 0, 2, 0))?;
+        func("func min[](x, y T) T { return Min(x, y) }", (None, 0, 1, 1))?;
+        func("func min[S interface{ ~[]byte|string }]()", (None, 1, 0, 0))?;
+
+        func(
+            "func f(int, int, float64) (float64, *[]int)",
+            (None, 0, 3, 2),
+        )?;
+        func(
+            "func (m *M) Print() { fmt.Print(m.message)}",
+            (Some(()), 0, 0, 0),
+        )?;
+        func(
+            "func f(int, int, float64) (*a, []b, map[c]d)",
+            (None, 0, 3, 3),
+        )?;
+        func(
+            "func min[T any](x, y T) T { return Min(x, y) }",
+            (None, 1, 1, 1),
+        )?;
+        func(
+            "func fn2() (int, *int, int) { return 0, nil, 0 }",
+            (None, 0, 0, 3),
+        )?;
+        func(
+            "func a(w t1, r *t2, e chan<- t3) {x <- t4{c: c, t: t};}",
+            (None, 0, 3, 0),
+        )?;
+        func(
+            "func min[T ~int|~float64](x, y T) T { return Min(x, y) }",
+            (None, 1, 1, 1),
+        )?;
+        func(
+            "func (t *T) f(a *u) *s {return &t[(ptr(u.P(a))>>3)%size].root}",
+            (Some(()), 0, 1, 1),
+        )?;
+        func(
+            "func (s *SL[K, V]) It() M[K, V] { return &S[K, V]{a.b.c[0], nil} }",
+            (Some(()), 0, 0, 1),
+        )?;
+
+        assert!(func("func(...int", (None, 0, 0, 0)).is_err());
+        assert!(func("func() (...int)", (None, 0, 0, 0)).is_err());
+        assert!(func("func(a int, bool)", (None, 0, 0, 0)).is_err());
+        assert!(func("func(int) (...bool, int)", (None, 0, 0, 0)).is_err());
 
         Ok(())
     }
 
     #[test]
     fn parse_type_decl() -> Result<()> {
-        let typ = |s| Parser::from(s).parse_decl(Parser::parse_type_spec);
+        let typ = |s| {
+            let mut parser = Parser::from(s);
+            let mut typ = parser.parse_decl(Parser::parse_type_spec)?;
+            assert!(parser.next()?.is_none());
+            Ok(typ.specs.pop().unwrap())
+        };
 
-        typ("type n [2]int")?;
-        typ("type a [sz(k{})]T")?;
-        typ("type p[T any] struct {a[T]}")?;
-        typ("type S[T int | string] struct { F T }")?;
-        typ("type S[K Order, V any] struct {SL[K, V]}")?;
-        typ("type S[T int | complex128, PT *T] struct {F PT}")?;
-        typ("type S[E ~int | ~complex128, T ~*E] struct {F T}")?;
-        typ("type S[T ~int | ~string, PT ~int | ~string | ~*T] struct {F T}")?;
-        typ("type S[T int | *bool, PT *T | float64, PPT *PT | string] struct {F PPT}")?;
-        typ("type S[T any] struct { P[T]; l L[T]}")?;
+        match typ("type n [2]int")?.typ {
+            ast::Expression::TypeArray(_) => {}
+            _ => return Err(anyhow::anyhow!("not type ARRAY")),
+        };
+
+        match typ("type a [sz(k{})]T")?.typ {
+            ast::Expression::TypeArray(_) => {}
+            _ => return Err(anyhow::anyhow!("not type ARRAY")),
+        };
+
+        let type_struct = |s| match typ(s)?.typ {
+            ast::Expression::TypeStruct(s) => Ok(s),
+            _ => return Err(anyhow::anyhow!("not type STRUCT")),
+        };
+
+        type_struct("type p[T any] struct {a[T]}")?;
+        type_struct("type S[T any] struct { P[T]; l L[T]}")?;
+        type_struct("type S[T int | string] struct { F T }")?;
+        type_struct("type S[K Order, V any] struct {SL[K, V]}")?;
+        type_struct("type S[T int | complex128, PT *T] struct {F PT}")?;
+        type_struct("type S[E ~int | ~complex128, T ~*E] struct {F T}")?;
+        type_struct("type S[T ~int | ~string, PT ~int | ~string | ~*T] struct {F T}")?;
+        type_struct("type S[T int | *bool, PT *T | float64, PPT *PT | string] struct {F PPT}")?;
 
         Ok(())
     }
@@ -2618,54 +2691,148 @@ mod test {
 
     #[test]
     fn parse_stmt() -> Result<()> {
-        let stmt = |s| Parser::from(s).parse_stmt();
+        let stmt = |s| {
+            let mut parser = Parser::from(s);
+            let stmt = parser.parse_stmt()?;
+            assert!(parser.next()?.is_none());
+            Ok(stmt)
+        };
 
-        stmt("a <- b{c: c, d: d}")?;
-        stmt("if err != nil { return }")?;
-        stmt("{ _ = &AnyList{1, '1'} }")?;
-        stmt("defer close() //\na = 1;")?;
-        stmt("fmt.Sprintf(`123`, rand.Int()%99);")?;
-        stmt("Update(a, x...,)")?;
-        stmt("return &S[K, V]{a.b.c[0], nil}")?;
+        match stmt("a <- b{c: c, d: d}")? {
+            ast::Statement::Send(_) => {}
+            _ => return Err(anyhow::anyhow!("not a SEND statement")),
+        };
+
+        match stmt("if err != nil { return }")? {
+            ast::Statement::If(ifs) => {
+                assert!(ifs.init.is_none());
+                assert_eq!(ifs.body.list.len(), 1)
+            }
+            _ => return Err(anyhow::anyhow!("not a IF statement")),
+        };
+
+        match stmt("{ _ = &AnyList{1, '1'} }")? {
+            ast::Statement::Block(block) => match block.list.first() {
+                Some(ast::Statement::Assign(_)) => {}
+                _ => return Err(anyhow::anyhow!("block is empty")),
+            },
+            _ => return Err(anyhow::anyhow!("not a BLOCK statement")),
+        };
+
+        match stmt("defer close()")? {
+            ast::Statement::Defer(_) => {}
+            _ => return Err(anyhow::anyhow!("not a DEFER statement")),
+        };
+
+        match stmt("fmt.Sprintf(`123`, rand.Int()%99);")? {
+            ast::Statement::Expr(ast::ExprStmt {
+                expr: ast::Expression::Call(call),
+            }) => {
+                assert_eq!(call.args.len(), 2);
+            }
+            _ => return Err(anyhow::anyhow!("not a CALL statement")),
+        };
+
+        match stmt("Update(a, x...)")? {
+            ast::Statement::Expr(ast::ExprStmt {
+                expr: ast::Expression::Call(call),
+            }) => {
+                assert_eq!(call.args.len(), 2);
+            }
+            _ => return Err(anyhow::anyhow!("not a CALL statement")),
+        };
+
+        match stmt("return &S[K, V]{a.b.c[0], nil}")? {
+            ast::Statement::Return(_) => {}
+            _ => return Err(anyhow::anyhow!("not a RETURN statement")),
+        };
 
         Ok(())
     }
 
     #[test]
     fn parse_assign_stmt() -> Result<()> {
-        let assign = |s| Parser::from(s).parse_simple_stmt();
+        let assign = |s, (l_len, r_len)| {
+            let mut parser = Parser::from(s);
+            match parser.parse_simple_stmt()? {
+                ast::Statement::Assign(assign) => {
+                    assert!(parser.next()?.is_none());
+                    assert_eq!((assign.left.len()), l_len);
+                    assert_eq!((assign.right.len()), r_len);
+                    Ok(assign)
+                }
+                _ => Err(anyhow::anyhow!("not a ASSIGN statement")),
+            }
+        };
 
-        assign("x = 1")?;
-        assign("*p = f()")?;
-        assign("a[i] = 23")?;
-        assign("(k) = <-ch")?;
-        assign("a[i] <<= 2")?;
-        assign("i &^= 1<<n")?;
-        assign("t := x.(type)")?;
-        assign("t, ok := x.(int)")?;
-        assign("f2 := func() { go f1() }")?;
-        assign("one, two, three = '一', '二', '三'")?;
-        assign("_ = &PeerInfo{time.Now(), '1'}")?;
-        assign("_ = AAA{A: 1,}")?;
-        assign("_ = m[K, V]{}")?;
-        assign("_ = &S[K, V]{a.b.c[0], nil}")?;
+        assign("x = 1", (1, 1))?;
+        assign("*p = f()", (1, 1))?;
+        assign("a[i] = 23", (1, 1))?;
+        assign("(k) = <-ch", (1, 1))?;
+        assign("a[i] <<= 2", (1, 1))?;
+        assign("i &^= 1<<n", (1, 1))?;
+        assign("_ = m[K, V]{}", (1, 1))?;
+        assign("t := x.(type)", (1, 1))?;
+        assign("_ = AAA{A: 1,}", (1, 1))?;
+        assign("t, ok := x.(int)", (2, 1))?;
+        assign("f2 := func() { go f1() }", (1, 1))?;
+        assign("_ = &S[K, V]{a.b.c[0], nil}", (1, 1))?;
+        assign("_ = &PeerInfo{time.Now(), '1'}", (1, 1))?;
+        assign("one, two, three = '一', '二', '三'", (3, 3))?;
 
         Ok(())
     }
 
     #[test]
     fn parse_for_stmt() -> Result<()> {
-        let stmt = |s| Parser::from(s).parse_for_stmt();
+        let range_stmt = |s| match Parser::from(s).parse_for_stmt()? {
+            ast::Statement::Range(rg) => Ok(rg),
+            _ => Err(anyhow::anyhow!("not a RANGE statement")),
+        };
 
-        stmt("for range ch {};")?;
-        stmt("for x := range ch {};")?;
-        stmt("for _, v := range x {};")?;
+        range_stmt("for range ch {};")?;
 
-        stmt("for {};")?;
-        stmt("for loop {};")?;
-        stmt("for i := 0; i < 1; {};")?;
-        stmt("for i := 0; i < 1; i++ {};")?;
-        stmt("for i := 0; i < 10; i = i + n {}")?;
+        let rg = range_stmt("for x := range ch {};")?;
+        assert!(rg.key.is_some());
+        assert!(rg.value.is_none());
+        assert!(rg.op.is_some());
+        assert!(rg.body.list.is_empty());
+
+        let rg = range_stmt("for _, v := range x {};")?;
+        assert!(rg.key.is_some());
+        assert!(rg.value.is_some());
+        assert!(rg.op.is_some());
+        assert!(rg.body.list.is_empty());
+
+        let for_stmt = |s| match Parser::from(s).parse_for_stmt()? {
+            ast::Statement::For(fs) => Ok(fs),
+            _ => Err(anyhow::anyhow!("not a FOR statement")),
+        };
+
+        let fs = for_stmt("for {};")?;
+        assert!(fs.init.is_none());
+        assert!(fs.cond.is_none());
+        assert!(fs.post.is_none());
+
+        let fs = for_stmt("for loop {};")?;
+        assert!(fs.init.is_none());
+        assert!(fs.cond.is_some());
+        assert!(fs.post.is_none());
+
+        let fs = for_stmt("for i := 0; i < 1; {};")?;
+        assert!(fs.init.is_some());
+        assert!(fs.cond.is_some());
+        assert!(fs.post.is_none());
+
+        let fs = for_stmt("for i := 0; i < 1; i++ {};")?;
+        assert!(fs.init.is_some());
+        assert!(fs.cond.is_some());
+        assert!(fs.post.is_some());
+
+        let fs = for_stmt("for i := 0; i < 10; i = i + n {}")?;
+        assert!(fs.init.is_some());
+        assert!(fs.cond.is_some());
+        assert!(fs.post.is_some());
 
         Ok(())
     }
@@ -2674,7 +2841,7 @@ mod test {
     fn parse_select_stmt() -> Result<()> {
         let select = |s| Parser::from(s).parse_select_stmt();
 
-        select(
+        let slt = select(
             "select {
             case i1 = <-c1:
             case c2 <- i2:
@@ -2684,35 +2851,83 @@ mod test {
             }",
         )?;
 
+        assert_eq!(slt.body.body.len(), 5);
+
         Ok(())
     }
 
     #[test]
     fn parse_switch_stmt() -> Result<()> {
-        let switch = |s| Parser::from(s).parse_switch_stmt();
+        let switch = |s| match Parser::from(s).parse_switch_stmt()? {
+            ast::Statement::Switch(swt) => Ok(swt),
+            _ => Err(anyhow::anyhow!("not a SWITCH statement")),
+        };
 
-        switch("switch x {}")?;
-        switch("switch x;x.(type) {}")?;
-        switch("switch prev := r.descsByName[name]; prev.(type) {}")?;
-        switch(
+        let swt = switch("switch x {}")?;
+        assert!(swt.init.is_none());
+        assert!(swt.tag.is_some());
+
+        let swt = switch("switch ;x {}")?;
+        assert!(swt.init.is_none());
+        assert!(swt.tag.is_some());
+
+        let swt = switch(
+            "switch ; {
+            case true:
+            print(mustbe)
+            default:
+        }",
+        )?;
+        assert!(swt.init.is_none());
+        assert!(swt.tag.is_none());
+        assert_eq!(swt.block.body.len(), 2);
+
+        let swt = switch(
+            "switch x {
+            case 5:
+            print(5)
+        }",
+        )?;
+        assert!(swt.init.is_none());
+        assert!(swt.tag.is_some());
+
+        let swt = switch(
             "switch tag {
             default: s3()
             case 0, 1, 2, 3: s1()
             case 4, 5, 6, 7: s2()
             }",
         )?;
-        switch(
+        assert!(swt.init.is_none());
+        assert!(swt.tag.is_some());
+
+        let swt = switch(
             "switch x := f(); {
             case x < 0: return -x
             default: return x
             }",
         )?;
-        switch(
+        assert!(swt.init.is_some());
+        assert!(swt.tag.is_none());
+
+        let type_switch = |s| match Parser::from(s).parse_switch_stmt()? {
+            ast::Statement::TypeSwitch(swt) => Ok(swt),
+            _ => Err(anyhow::anyhow!("not a TYPE_SWITCH statement")),
+        };
+
+        let swt = type_switch("switch x;x.(type) {}")?;
+        assert!(swt.init.is_some());
+        assert!(swt.tag.is_some());
+
+        let swt = type_switch("switch prev := r.descsByName[name]; prev.(type) {}")?;
+        assert!(swt.init.is_some());
+        assert!(swt.tag.is_some());
+
+        type_switch(
             "
         switch a := x; c.(type) {
             case nil, *d:
             default:
-        
             }",
         )?;
 
