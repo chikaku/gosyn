@@ -1097,16 +1097,32 @@ impl Parser {
                 Some((_, Token::Operator(Operator::ParenLeft))) => {
                     self.next()?;
                     let mut args = vec![];
+
+                    let mut end_with_comma = false;
                     while self.current_not(Operator::ParenRight)
                         && self.current_not(Operator::DotDotDot)
                     {
-                        args.push(self.parse_next_level_expr()?);
-                        self.skipped(Operator::Comma)?;
+                        if !args.is_empty() {
+                            self.expect(Operator::Comma)?;
+                            end_with_comma = true;
+                        }
+
+                        // NOTE: last parameter can have an extra comma like `f(a, b,)`
+                        if self.current_not(Operator::ParenRight)
+                            && self.current_not(Operator::DotDotDot)
+                        {
+                            args.push(self.parse_next_level_expr()?);
+                            end_with_comma = false;
+                        }
                     }
 
                     let func = Box::new(x);
                     let current_pos = self.current_pos();
                     let dots = self.skipped(Operator::DotDotDot)?.then_some(current_pos);
+                    if dots.is_some() && (end_with_comma || args.is_empty()) {
+                        return Err(self.else_error_at(current_pos, "dotdotdot has no name"));
+                    }
+
                     self.skipped(Operator::Comma)?; // (a, b...,)
 
                     let pos = (pos, self.expect(Operator::ParenRight)?);
@@ -1705,6 +1721,11 @@ impl Parser {
 
                 if op == Operator::Define {
                     self.check_assign_stmt(&left)?;
+                }
+
+                if left.len() < right.len() {
+                    return Err(self
+                        .else_error_at(pos, "left side can not less than right side for assign"));
                 }
 
                 let assign = ast::AssignStmt { op, pos, left, right };
@@ -2459,6 +2480,7 @@ mod test {
             _ => return Err(anyhow::anyhow!("not type STRUCT")),
         };
 
+        type_struct("type s struct{a struct{}}")?;
         type_struct("type p[T any] struct {a[T]}")?;
         type_struct("type S[T any] struct { P[T]; l L[T]}")?;
         type_struct("type S[T int | string] struct { F T }")?;
@@ -2467,6 +2489,10 @@ mod test {
         type_struct("type S[E ~int | ~complex128, T ~*E] struct {F T}")?;
         type_struct("type S[T ~int | ~string, PT ~int | ~string | ~*T] struct {F T}")?;
         type_struct("type S[T int | *bool, PT *T | float64, PPT *PT | string] struct {F PPT}")?;
+
+        assert!(type_struct("type s struct{a, b}").is_err());
+        assert!(type_struct("type s struct{a int,int}").is_err());
+        assert!(type_struct("type s struct{a int, b int}").is_err());
 
         Ok(())
     }
@@ -2690,6 +2716,40 @@ mod test {
     }
 
     #[test]
+    fn parse_call_expr() -> Result<()> {
+        let call = |s| {
+            let mut parser = Parser::from(s);
+            match parser.expression()? {
+                ast::Expression::Call(call) => {
+                    assert!(parser.next()?.is_none());
+                    Ok(call)
+                }
+                _ => Err(anyhow::anyhow!("not a CALL expression")),
+            }
+        };
+
+        call("f(1)")?;
+        call("f(1,2)")?;
+        call("f(1,2,)")?;
+        call("f(1,2,a...)")?;
+        call("f(1,2,a...,)")?;
+        call("f(f(),f()...)")?;
+        call("f(f(f(f(f(f(1),),),),),)")?;
+        call("f(fi()[f()],fi()[a].b...)")?;
+        call("f(fi()[f()],fi()[a].b...,)")?;
+        call("f(struct{a, b int}{a: 1, b: 2},)")?;
+
+        assert!(call("f(...)").is_err());
+        assert!(call("f(a b)").is_err());
+        assert!(call("f(a...b)").is_err());
+        assert!(call("f(a..., b)").is_err());
+        assert!(call("f(a, b, ...)").is_err());
+        assert!(call("f(fi()[f()] fi()[a].b...)").is_err());
+
+        Ok(())
+    }
+
+    #[test]
     fn parse_stmt() -> Result<()> {
         let stmt = |s| {
             let mut parser = Parser::from(s);
@@ -2756,9 +2816,16 @@ mod test {
             let mut parser = Parser::from(s);
             match parser.parse_simple_stmt()? {
                 ast::Statement::Assign(assign) => {
-                    assert!(parser.next()?.is_none());
-                    assert_eq!((assign.left.len()), l_len);
-                    assert_eq!((assign.right.len()), r_len);
+                    if !parser.next()?.is_none() {
+                        return Err(anyhow::anyhow!("parser is not ended"));
+                    }
+                    if assign.left.len() != l_len {
+                        return Err(anyhow::anyhow!("left side length error"));
+                    }
+                    if assign.right.len() != r_len {
+                        return Err(anyhow::anyhow!("right side length error"));
+                    }
+
                     Ok(assign)
                 }
                 _ => Err(anyhow::anyhow!("not a ASSIGN statement")),
@@ -2779,6 +2846,10 @@ mod test {
         assign("_ = &S[K, V]{a.b.c[0], nil}", (1, 1))?;
         assign("_ = &PeerInfo{time.Now(), '1'}", (1, 1))?;
         assign("one, two, three = '一', '二', '三'", (3, 3))?;
+
+        assert!(assign("a b = f()", (2, 1)).is_err());
+        assert!(assign("a = b() c()", (1, 2)).is_err());
+        assert!(assign("a = b(), c()", (1, 2)).is_err());
 
         Ok(())
     }
@@ -2852,6 +2923,15 @@ mod test {
         )?;
 
         assert_eq!(slt.body.body.len(), 5);
+
+        select("select {}")?;
+        select("select {};")?;
+        select("select  { default: ;}")?;
+        select("select { default: }")?;
+
+        assert!(select("select{;}").is_err());
+        assert!(select("select; {}").is_err());
+        assert!(select("select a {}").is_err());
 
         Ok(())
     }
@@ -2936,15 +3016,28 @@ mod test {
 
     #[test]
     fn parse_if_stmt() -> Result<()> {
-        let stmt = |s| Parser::from(s).parse_if_stmt();
+        let stmt = |s| {
+            let mut parser = Parser::from(s);
+            let ifst = parser.parse_if_stmt()?;
+            assert!(parser.next()?.is_none());
+            Ok(ifst)
+        };
 
-        stmt("if a > 0 {};")?;
         stmt("if true {{}};")?;
-        stmt("if a > 0 && yes {};")?;
-        stmt("if x := f(); x > 0 {};")?;
         stmt("if m[struct{ int }{1}] {};")?;
         stmt("if struct{ bool }{true}.bool {};")?;
-        stmt("if true {} else if false {} else {};")?;
+
+        let ifst = stmt("if a > 0 {};")?;
+        assert!(ifst.init.is_none());
+
+        let ifst = stmt("if a > 0 && yes {};")?;
+        assert!(ifst.init.is_none());
+
+        let ifst = stmt("if x := f(); x > 0 {};")?;
+        assert!(ifst.init.is_some());
+
+        let ifst = stmt("if true {} else if false {} else {};")?;
+        assert!(ifst.else_.is_some());
 
         assert!(stmt("if true {} else false {};").is_err());
 
