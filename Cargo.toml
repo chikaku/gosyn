@@ -1,6 +1,6 @@
 [package]
 name = "gosyn"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 authors = ["Kevin Chen <kevin@chenbc.me>"]
 description = "Golang syntax parser in Rust"
