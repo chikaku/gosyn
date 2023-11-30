@@ -22,14 +22,14 @@ pub struct Parser {
 
 impl Parser {
     /// parse input source to `ast::File`, path will be \<input\>
-    pub fn from<S: AsRef<str>>(s: S) -> Self {
+    pub fn from<S: AsRef<str>>(s: S) -> Result<Self> {
         let mut parser = Parser {
             scan: Scanner::from(s),
             ..Default::default()
         };
 
-        parser.next().expect("unexpected new Parser error");
-        parser
+        parser.next()?;
+        Ok(parser)
     }
 
     /// read file content and parse to `ast::File`

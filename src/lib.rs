@@ -13,7 +13,7 @@ pub use parser::Parser;
 
 /// parse source code to `ast::File`
 pub fn parse_source<S: AsRef<str>>(source: S) -> anyhow::Result<ast::File> {
-    parser::Parser::from(source).parse_file()
+    parser::Parser::from(source)?.parse_file()
 }
 
 /// parse source code from given path to  `ast::File`
