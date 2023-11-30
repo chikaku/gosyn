@@ -18,28 +18,25 @@ pub struct Parser {
     lead_comments: Vec<Rc<ast::Comment>>,
     current: Option<(usize, Token)>,
     prev_pos: (usize, bool), // save previous token position for rollback
+    is_started: bool,
 }
 
 impl Parser {
     /// parse input source to `ast::File`, path will be \<input\>
     pub fn from<S: AsRef<str>>(s: S) -> Self {
-        let mut parser = Parser {
+        let parser = Parser {
             scan: Scanner::from(s),
             ..Default::default()
         };
-
-        parser.next().expect("unexpected new Parser error");
         parser
     }
 
     /// read file content and parse to `ast::File`
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let mut parser = Parser {
+        let parser = Parser {
             scan: Scanner::from_file(path)?,
             ..Default::default()
         };
-
-        parser.next()?;
         Ok(parser)
     }
 }
@@ -151,6 +148,9 @@ impl Parser {
     }
 
     fn next(&mut self) -> Result<Option<&(usize, Token)>> {
+        if !self.is_started {
+            self.is_started = true;
+        }
         let mut line = 0;
         let mut pos_tok = self.scan_next()?;
         while let Some((pos, Token::Comment(text))) = pos_tok {
@@ -269,6 +269,9 @@ impl Parser {
     /// parse source into golang file
     /// including imports and `type`, `var`, `const` declarations
     pub fn parse_file(&mut self) -> Result<ast::File> {
+        if !self.is_started {
+            self.next()?;
+        }
         let mut file = ast::File {
             path: self.scan.path(),
             ..Default::default()
@@ -2296,10 +2299,16 @@ mod test {
 
     use anyhow::{Ok, Result};
 
+    fn new_parser(s: &str) -> Parser {
+        let mut parser = Parser::from(s);
+        parser.next().expect("no error parsing test input");
+        parser
+    }
+
     #[test]
     fn parse_package() -> Result<()> {
         let pkg = |s| {
-            let mut parser = Parser::from(s);
+            let mut parser = new_parser(s);
             let pkg = parser.parse_package()?;
             assert!(parser.next()?.is_none());
             Ok(pkg)
@@ -2319,7 +2328,7 @@ mod test {
     #[test]
     fn parse_imports() -> Result<()> {
         let import = |s| {
-            let mut parser = Parser::from(s);
+            let mut parser = new_parser(s);
             let imp = parser.parse_import_decl()?;
             assert!(parser.next()?.is_none());
             Ok(imp)
@@ -2343,7 +2352,7 @@ mod test {
     #[test]
     fn parse_decl() -> Result<()> {
         let vars = |s| {
-            let mut parser = Parser::from(s);
+            let mut parser = new_parser(s);
             let vars = parser.parse_decl(Parser::parse_var_spec)?;
             assert!(parser.next()?.is_none());
             Ok(vars)
@@ -2362,7 +2371,7 @@ mod test {
         assert!(vars("var a, b;").is_err());
 
         let consts = |s| {
-            let mut parser = Parser::from(s);
+            let mut parser = new_parser(s);
             let consts = parser.parse_decl(Parser::parse_const_spec)?;
             assert!(parser.next()?.is_none());
             Ok(consts)
@@ -2382,7 +2391,7 @@ mod test {
     #[test]
     fn parse_func_decl() -> Result<()> {
         let func = |s, (none_recv, type_params_len, params_len, result_len)| {
-            let mut parser = Parser::from(s);
+            let mut parser = new_parser(s);
             let func = parser.parse_func_decl()?;
             assert!(parser.next()?.is_none());
 
@@ -2459,7 +2468,7 @@ mod test {
     #[test]
     fn parse_type_decl() -> Result<()> {
         let typ = |s| {
-            let mut parser = Parser::from(s);
+            let mut parser = new_parser(s);
             let mut typ = parser.parse_decl(Parser::parse_type_spec)?;
             assert!(parser.next()?.is_none());
             Ok(typ.specs.pop().unwrap())
@@ -2499,7 +2508,7 @@ mod test {
 
     #[test]
     fn parse_parameters() -> Result<()> {
-        let params = |s| Parser::from(s).parameters();
+        let params = |s| new_parser(s).parameters();
 
         params("()")?;
         params("(S[T])")?;
@@ -2519,7 +2528,7 @@ mod test {
         params("(a, b int, z float64, opt ...T)")?;
 
         let check = |s| {
-            let mut ps = Parser::from(s);
+            let mut ps = new_parser(s);
             let params = ps.parameters()?;
             ps.check_field_list(params, true)
         };
@@ -2531,7 +2540,7 @@ mod test {
         assert!(check("(...int, ...bool)").is_err());
         assert!(check("(a, b, c, d ...int)").is_err());
 
-        let ret_params = |s| Parser::from(s).parse_result();
+        let ret_params = |s| new_parser(s).parse_result();
 
         ret_params("(int)")?;
         ret_params("(a int)")?;
@@ -2539,7 +2548,7 @@ mod test {
         ret_params("(a int, b bool)")?;
 
         let check = |s| {
-            let mut ps = Parser::from(s);
+            let mut ps = new_parser(s);
             let params = ps.parameters()?;
             ps.check_field_list(params, false)
         };
@@ -2553,7 +2562,7 @@ mod test {
 
     #[test]
     fn parse_expr() -> Result<()> {
-        let expr = |s| Parser::from(s).expression();
+        let expr = |s| new_parser(s).expression();
 
         expr("a + b")?;
         expr("a % b")?;
@@ -2585,7 +2594,7 @@ mod test {
 
     #[test]
     fn parse_operand() -> Result<()> {
-        let operand = |s| Parser::from(s).operand();
+        let operand = |s| new_parser(s).operand();
 
         operand("a.b")?;
         operand("`Hola`")?;
@@ -2602,7 +2611,7 @@ mod test {
 
     #[test]
     fn parse_slice_index() -> Result<()> {
-        let slice = |s| Parser::from(s).parse_slice_index_or_type_inst();
+        let slice = |s| new_parser(s).parse_slice_index_or_type_inst();
 
         slice("[a]")?;
         slice("[:]")?;
@@ -2622,7 +2631,7 @@ mod test {
 
     #[test]
     fn parse_func_type() -> Result<()> {
-        let func = |s| Parser::from(s).func_type();
+        let func = |s| new_parser(s).func_type();
 
         func("func()")?;
         func("func(x int) int")?;
@@ -2643,7 +2652,7 @@ mod test {
 
     #[test]
     fn parse_interface_type() -> Result<()> {
-        let interface = |s| Parser::from(s).parse_interface_type();
+        let interface = |s| new_parser(s).parse_interface_type();
 
         interface("
         interface {
@@ -2687,7 +2696,7 @@ mod test {
 
     #[test]
     fn parse_struct_type() -> Result<()> {
-        let struct_ = |s| Parser::from(s).struct_type();
+        let struct_ = |s| new_parser(s).struct_type();
 
         struct_("struct {}")?;
         struct_("struct {T1}")?;
@@ -2718,7 +2727,7 @@ mod test {
     #[test]
     fn parse_call_expr() -> Result<()> {
         let call = |s| {
-            let mut parser = Parser::from(s);
+            let mut parser = new_parser(s);
             match parser.expression()? {
                 ast::Expression::Call(call) => {
                     assert!(parser.next()?.is_none());
@@ -2752,7 +2761,7 @@ mod test {
     #[test]
     fn parse_stmt() -> Result<()> {
         let stmt = |s| {
-            let mut parser = Parser::from(s);
+            let mut parser = new_parser(s);
             let stmt = parser.parse_stmt()?;
             assert!(parser.next()?.is_none());
             Ok(stmt)
@@ -2813,7 +2822,7 @@ mod test {
     #[test]
     fn parse_assign_stmt() -> Result<()> {
         let assign = |s, (l_len, r_len)| {
-            let mut parser = Parser::from(s);
+            let mut parser = new_parser(s);
             match parser.parse_simple_stmt()? {
                 ast::Statement::Assign(assign) => {
                     if !parser.next()?.is_none() {
@@ -2856,7 +2865,7 @@ mod test {
 
     #[test]
     fn parse_for_stmt() -> Result<()> {
-        let range_stmt = |s| match Parser::from(s).parse_for_stmt()? {
+        let range_stmt = |s| match new_parser(s).parse_for_stmt()? {
             ast::Statement::Range(rg) => Ok(rg),
             _ => Err(anyhow::anyhow!("not a RANGE statement")),
         };
@@ -2875,7 +2884,7 @@ mod test {
         assert!(rg.op.is_some());
         assert!(rg.body.list.is_empty());
 
-        let for_stmt = |s| match Parser::from(s).parse_for_stmt()? {
+        let for_stmt = |s| match new_parser(s).parse_for_stmt()? {
             ast::Statement::For(fs) => Ok(fs),
             _ => Err(anyhow::anyhow!("not a FOR statement")),
         };
@@ -2910,7 +2919,7 @@ mod test {
 
     #[test]
     fn parse_select_stmt() -> Result<()> {
-        let select = |s| Parser::from(s).parse_select_stmt();
+        let select = |s| new_parser(s).parse_select_stmt();
 
         let slt = select(
             "select {
@@ -2938,7 +2947,7 @@ mod test {
 
     #[test]
     fn parse_switch_stmt() -> Result<()> {
-        let switch = |s| match Parser::from(s).parse_switch_stmt()? {
+        let switch = |s| match new_parser(s).parse_switch_stmt()? {
             ast::Statement::Switch(swt) => Ok(swt),
             _ => Err(anyhow::anyhow!("not a SWITCH statement")),
         };
@@ -2990,7 +2999,7 @@ mod test {
         assert!(swt.init.is_some());
         assert!(swt.tag.is_none());
 
-        let type_switch = |s| match Parser::from(s).parse_switch_stmt()? {
+        let type_switch = |s| match new_parser(s).parse_switch_stmt()? {
             ast::Statement::TypeSwitch(swt) => Ok(swt),
             _ => Err(anyhow::anyhow!("not a TYPE_SWITCH statement")),
         };
@@ -3017,7 +3026,7 @@ mod test {
     #[test]
     fn parse_if_stmt() -> Result<()> {
         let stmt = |s| {
-            let mut parser = Parser::from(s);
+            let mut parser = new_parser(s);
             let ifst = parser.parse_if_stmt()?;
             assert!(parser.next()?.is_none());
             Ok(ifst)
