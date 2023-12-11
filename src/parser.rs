@@ -24,20 +24,18 @@ pub struct Parser {
 impl Parser {
     /// parse input source to `ast::File`, path will be \<input\>
     pub fn from<S: AsRef<str>>(s: S) -> Self {
-        let parser = Parser {
+        Parser {
             scan: Scanner::from(s),
             ..Default::default()
-        };
-        parser
+        }
     }
 
     /// read file content and parse to `ast::File`
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let parser = Parser {
+        Ok(Parser {
             scan: Scanner::from_file(path)?,
             ..Default::default()
-        };
-        Ok(parser)
+        })
     }
 }
 
@@ -1956,10 +1954,10 @@ impl Parser {
 
         self.expr_level = prev_level;
         let init = init.map(Box::new);
-        let type_assert = self.check_switch_type_assert(&tag)?;
-        let block = self.parse_case_block(type_assert)?;
+        let type_switch = self.is_type_switch(&tag)?;
+        let block = self.parse_case_block(type_switch)?;
 
-        Ok(if type_assert {
+        Ok(if type_switch {
             let tag = tag.map(Box::new);
             ast::Statement::TypeSwitch(ast::TypeSwitchStmt { pos, init, tag, block })
         } else {
@@ -1997,11 +1995,11 @@ impl Parser {
         Ok(ast::CaseBlock { pos, body })
     }
 
-    fn check_switch_type_assert(&mut self, tag: &Option<ast::Statement>) -> Result<bool> {
+    fn is_type_switch(&mut self, tag: &Option<ast::Statement>) -> Result<bool> {
         Ok(match tag {
             Some(ast::Statement::Expr(ast::ExprStmt {
-                expr: ast::Expression::TypeAssert(..),
-            })) => true,
+                expr: ast::Expression::TypeAssert(ast::TypeAssertion { right, .. }),
+            })) => right.is_none(),
             Some(ast::Statement::Assign(assign)) => {
                 assign.left.len() == 1
                     && assign.right.len() == 1
@@ -3005,6 +3003,50 @@ mod test {
         assert!(swt.init.is_some());
         assert!(swt.tag.is_none());
 
+        let swt = switch(
+            "
+        switch a.b.c.(string) {
+            case \"ok\":
+            default:
+            }",
+        )?;
+        assert!(swt.init.is_none());
+        assert!(swt.tag.is_some());
+
+        let swt = switch(
+            "
+        switch v, ok := a.b.c.(string); v {
+            case \"ok\":
+            default:
+            }",
+        )?;
+        assert!(swt.init.is_some());
+        assert!(swt.tag.is_some());
+
+        let swt = switch(
+            "
+            switch s = a.(string); s {
+            case \"\":
+            }",
+        )?;
+        assert!(swt.init.is_some());
+        assert!(swt.tag.is_some());
+
+        assert!(switch(
+            "switch s = a.(string) {
+            case \"\":
+            }",
+        )
+        .is_err());
+
+        // FIXME: error reason is not correct
+        assert!(switch(
+            "switch s, ok = a.(string) {
+            case \"\":
+            }",
+        )
+        .is_err());
+
         let type_switch = |s| match new_started_parser(s).parse_switch_stmt()? {
             ast::Statement::TypeSwitch(swt) => Ok(swt),
             _ => Err(anyhow::anyhow!("not a TYPE_SWITCH statement")),
@@ -3018,13 +3060,51 @@ mod test {
         assert!(swt.init.is_some());
         assert!(swt.tag.is_some());
 
-        type_switch(
+        let swt = type_switch(
             "
         switch a := x; c.(type) {
             case nil, *d:
             default:
             }",
         )?;
+        assert!(swt.init.is_some());
+        assert!(swt.tag.is_some());
+
+        let swt = type_switch(
+            "
+        switch v.(type) {
+        case nil:
+            printString(\"x is nil\")                // type of i is type of x (interface{})
+        case int:
+            printInt(i)                            // type of i is int
+        case float64:
+            printFloat64(i)                        // type of i is float64
+        case func(int) float64:
+            printFunction(i)                       // type of i is func(int) float64
+        case bool, string:
+            printString(\"type is bool or string\")  // type of i is type of x (interface{})
+        default:
+            printString(\"don't know the type\")     // type of i is type of x (interface{})
+            }",
+        )?;
+        assert!(swt.init.is_none());
+        assert!(swt.tag.is_some());
+
+        let swt = type_switch(
+            "
+            switch t := v.(type) {
+                case int:
+                    print(t+1)
+                case bool:
+                    print(!!t)
+                case string:
+                    print(t+\"!!\")
+                default:
+            }
+            ",
+        )?;
+        assert!(swt.init.is_none());
+        assert!(swt.tag.is_some());
 
         Ok(())
     }
