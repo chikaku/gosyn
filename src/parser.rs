@@ -694,6 +694,12 @@ impl Parser {
                 self.expect(Operator::ParenRight)?;
                 Ok(Some(typ))
             }
+            
+            Some((_, Token::Literal(LitKind::String, _))) => Ok(Some(self.expression()?)),
+            Some((_, Token::Literal(LitKind::Integer, _))) => Ok(Some(self.expression()?)),
+            Some((_, Token::Literal(LitKind::Float, _))) => Ok(Some(self.expression()?)),
+            Some((_, Token::Literal(LitKind::Imag, _))) => Ok(Some(self.expression()?)),
+            Some((_, Token::Literal(LitKind::Char, _))) => Ok(Some(self.expression()?)),
 
             _ => Ok(None),
         }
@@ -3018,13 +3024,45 @@ mod test {
         assert!(swt.init.is_some());
         assert!(swt.tag.is_some());
 
-        type_switch(
+        let swt = type_switch(
             "
         switch a := x; c.(type) {
             case nil, *d:
             default:
             }",
         )?;
+        assert!(swt.init.is_some());
+        assert!(swt.tag.is_some());
+
+        let swt = type_switch(
+            "
+        switch x.(int) { 
+            case 1: 
+                fallthrough
+            case 2: 
+            default: 
+        }",
+        )?;
+        assert!(swt.init.is_none());
+        assert!(swt.tag.is_some());
+
+        let swt = type_switch(
+            "
+        switch x.(type) { 
+            case nil: 
+            case int: 
+            case uint: 
+            case float64: 
+            case func(int) float64: 
+            case bool:
+            case string:
+            case []byte:
+            case decimal.Decimal:
+            default:  
+        }",
+        )?;
+        assert!(swt.init.is_none());
+        assert!(swt.tag.is_some());
 
         Ok(())
     }
