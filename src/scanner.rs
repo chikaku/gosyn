@@ -117,7 +117,7 @@ impl Scanner {
     }
 
     #[rustfmt::skip]
-    fn try_insert_semicolon2(&mut self, tok: &Token) -> bool {
+    fn try_insert_semicolon(&mut self, tok: &Token) -> bool {
         matches!(
             tok,
             | &Token::Literal(..)
@@ -130,6 +130,7 @@ impl Scanner {
             | &Token::Keyword(Keyword::Return)
             | &Token::Keyword(Keyword::Continue)
             | &Token::Keyword(Keyword::FallThrough)
+            | &Token::Keyword(Keyword::Package)
         )
     }
 
@@ -192,7 +193,7 @@ impl Scanner {
         let (tok, char_count) = self.scan_token()?;
         self.add_token_cross_line(&tok);
         self.pos += char_count;
-        self.semicolon = self.try_insert_semicolon2(&tok);
+        self.semicolon = self.try_insert_semicolon(&tok);
         Ok(Some((current, tok)))
     }
 

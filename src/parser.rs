@@ -2319,12 +2319,12 @@ mod test {
         };
 
         pkg("package main")?;
-        pkg("package\n\nmain")?;
 
         assert!(pkg("\n\n").is_err());
         assert!(pkg("package _").is_err());
         assert!(pkg("package\n_").is_err());
         assert!(pkg("package package").is_err());
+        assert!(pkg("package\n\nmain").is_err());
 
         Ok(())
     }
