@@ -40,6 +40,21 @@ impl Parser {
 }
 
 impl Parser {
+    const MAX_DEPTH: i32 = 64;
+
+    fn inc_expr_level(&mut self) -> Result<()> {
+        self.expr_level += 1;
+        if self.expr_level >= Self::MAX_DEPTH {
+            Err(self.else_error("too many depth"))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn dec_expr_level(&mut self) {
+        self.expr_level -= 1;
+    }
+
     fn unexpected<K>(&self, expect: &[K], actual: Option<(usize, Token)>) -> anyhow::Error
     where
         K: Into<TokenKind> + Copy,
@@ -450,10 +465,10 @@ impl Parser {
 
                 let mut x = ast::Expression::Ident(self.identifier()?);
                 if !self.current_is(Operator::BarackRight) {
-                    self.expr_level += 1;
+                    self.inc_expr_level()?;
                     let p = self.primary_expression(Some(x))?;
                     x = self.binary_expression(Some(p), 0)?;
-                    self.expr_level -= 1;
+                    self.dec_expr_level();
                 }
 
                 let (pname, ptype) = extract(x, self.current_is(Operator::Comma));
@@ -560,9 +575,14 @@ impl Parser {
         Ok(result)
     }
 
+    #[inline]
     fn type_(&mut self) -> Result<ast::Expression> {
+        self.inc_expr_level()?;
         match self.type_or_none()? {
-            Some(typ) => Ok(typ),
+            Some(typ) => {
+                self.dec_expr_level();
+                Ok(typ)
+            }
             None => Err(self.else_error("expect a type representation")),
         }
     }
@@ -574,7 +594,7 @@ impl Parser {
     /// if not strict, the first element may be a expression
     /// if strict we must have a list of type
     fn type_list(&mut self, strict: bool) -> Result<(ast::Expression, bool)> {
-        self.expr_level += 1;
+        self.inc_expr_level()?;
         let expr = match strict {
             true => self.type_()?,
             false => self.expression()?,
@@ -591,12 +611,12 @@ impl Parser {
                     }
                 }
 
-                self.expr_level -= 1;
+                self.dec_expr_level();
                 return Ok((ast::Expression::List(list), true));
             }
         }
 
-        self.expr_level -= 1;
+        self.dec_expr_level();
         Ok((expr, comma))
     }
 
@@ -686,11 +706,15 @@ impl Parser {
                 Ok(Some(self.qualified_ident(None)?))
             }
 
-            Some((_, Token::Operator(Operator::ParenLeft))) => {
+            Some((pos0, Token::Operator(Operator::ParenLeft))) => {
+                let pos0 = *pos0;
                 self.next()?;
                 let typ = self.type_()?;
-                self.expect(Operator::ParenRight)?;
-                Ok(Some(typ))
+                let pos1 = self.expect(Operator::ParenRight)?;
+                Ok(Some(ast::Expression::Paren(ast::ParenExpression {
+                    pos: (pos0, pos1),
+                    expr: Box::new(typ),
+                })))
             }
 
             _ => Ok(None),
@@ -911,6 +935,7 @@ impl Parser {
         }
     }
 
+    #[inline]
     fn expression_list(&mut self) -> Result<Vec<ast::Expression>> {
         let mut result = vec![self.expression()?];
         while self.skipped(Operator::Comma)? {
@@ -920,16 +945,18 @@ impl Parser {
         Ok(result)
     }
 
+    #[inline]
     fn parse_next_level_expr(&mut self) -> Result<ast::Expression> {
-        self.expr_level += 1;
+        self.inc_expr_level()?;
         let expr = self.expression();
-        self.expr_level -= 1;
+        self.dec_expr_level();
         expr
     }
 
     /// parse source into golang Expression
     /// Expression = UnaryExpr | Expression binary_op Expression .
     /// UnaryExpr  = PrimaryExpr | unary_op UnaryExpr .
+    #[inline]
     pub fn expression(&mut self) -> Result<ast::Expression> {
         if !self.is_started {
             self.next()?;
@@ -1320,14 +1347,14 @@ impl Parser {
 
     fn parse_lit_value(&mut self) -> Result<ast::LiteralValue> {
         let mut values = vec![];
-        self.expr_level += 1;
+        self.inc_expr_level()?;
         let pos0 = self.expect(Operator::BraceLeft)?;
         while !self.current_is(Operator::BraceRight) {
             values.push(self.parse_element()?);
             self.skipped(Operator::Comma)?;
         }
 
-        self.expr_level -= 1;
+        self.dec_expr_level();
         let pos1 = self.expect(Operator::BraceRight)?;
         let pos = (pos0, pos1);
         Ok(ast::LiteralValue { pos, values })
@@ -1806,13 +1833,13 @@ impl Parser {
 
     fn parse_block_stmt(&mut self) -> Result<ast::BlockStmt> {
         let mut list = vec![];
-        self.expr_level += 1;
+        self.inc_expr_level()?;
         let pos0 = self.expect(Operator::BraceLeft)?;
         while !self.current_is(Operator::BraceRight) {
             list.push(self.parse_stmt()?);
         }
 
-        self.expr_level -= 1;
+        self.dec_expr_level();
         let pos = (pos0, self.expect(Operator::BraceRight)?);
         Ok(ast::BlockStmt { pos, list })
     }

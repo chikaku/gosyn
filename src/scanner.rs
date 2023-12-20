@@ -28,8 +28,7 @@ impl Scanner {
     pub(crate) fn from<S: AsRef<str>>(s: S) -> Self {
         let path = "<input>".into();
         let source = s.as_ref().to_string();
-        let (indices, chars): (Vec<_>, Vec<_>) =
-            source.char_indices().map(|(pos, ch)| (pos, ch)).unzip();
+        let (indices, chars): (Vec<_>, Vec<_>) = source.char_indices().unzip();
 
         Self {
             path,
@@ -48,8 +47,7 @@ impl Scanner {
         }
 
         let path = path.as_ref().into();
-        let (indices, chars): (Vec<_>, Vec<_>) =
-            source.char_indices().map(|(pos, ch)| (pos, ch)).unzip();
+        let (indices, chars): (Vec<_>, Vec<_>) = source.char_indices().unzip();
 
         Ok(Self {
             path,
@@ -598,7 +596,7 @@ fn is_decimal_digit(c: char) -> bool {
 }
 
 fn is_hex_digit(c: char) -> bool {
-    matches!(c, '0'..='9' | 'a'..='f' | 'A'..='F')
+    c.is_ascii_hexdigit()
 }
 
 fn is_escaped_char(c: char) -> bool {
