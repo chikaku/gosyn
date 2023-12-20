@@ -132,11 +132,11 @@ impl Parser {
         !self.current_is(expect)
     }
 
-    fn current_kind(&self) -> TokenKind {
-        self.current
-            .as_ref()
-            .map(|(_, tok)| tok.kind())
-            .expect("unexpected EOF")
+    fn current_kind(&self) -> Result<TokenKind> {
+        match self.current.as_ref().map(|(_, tok)| tok.kind()) {
+            Some(kind) => Ok(kind),
+            None => Err(self.else_error("unexpected EOF")),
+        }
     }
 
     fn current_pos(&self) -> usize {
@@ -459,7 +459,7 @@ impl Parser {
             return Ok(ast::TypeSpec { docs, alias, name, typ, params });
         }
 
-        match self.current_kind() {
+        match self.current_kind()? {
             TokenKind::Literal(LitKind::Ident) => {
                 let start2 = self.preback();
 
@@ -1440,7 +1440,7 @@ impl Parser {
         let mut id_list = vec![self.identifier()?];
 
         loop {
-            match self.current_kind() {
+            match self.current_kind()? {
                 TokenKind::Operator(Operator::ParenRight) => {
                     // Type1, Type2) | Type1, Type2,)
                     return Ok(id_list.into_iter().map(|id| id.into()).collect());
