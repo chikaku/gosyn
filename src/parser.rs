@@ -180,10 +180,12 @@ impl Parser {
         }
 
         if let Some(comment) = self.lead_comments.last() {
-            let line0 = self.scan.line_info(comment.pos).0;
+            // TODO: avoid .chars().count()
+            let comment_end_pos = comment.pos + comment.text.chars().count();
+            let comment_end_line = self.scan.line_info(comment_end_pos).0;
             if let Some((pos, _)) = &pos_tok {
-                let line1 = self.scan.line_info(*pos).0;
-                if line1 > line0 + 1 {
+                let token_start_line = self.scan.line_info(*pos).0;
+                if token_start_line > comment_end_line + 1 {
                     self.lead_comments.clear();
                 }
             }
@@ -3200,5 +3202,27 @@ mod test {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn parse_func_docs() -> Result<()> {
+        // TODO: need more test case
+        let code = include_str!("../tests/testdata/func_docs.go");
+        let ast = Parser::from(code).parse_file()?;
+
+        match ast.decl.get(0) {
+            Some(Declaration::Function(x)) => {
+                assert_eq!(
+                    x.docs[0].to_owned().text,
+                    "/*
+----------------abc-------------------------
+test-abc[bcd]
+*/"
+                );
+
+                Ok(())
+            }
+            _ => Err(anyhow::anyhow!("no declaration found")),
+        }
     }
 }
