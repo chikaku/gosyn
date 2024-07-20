@@ -12,6 +12,7 @@ license = "MIT"
 [dependencies]
 anyhow = "1.0"
 unic-ucd-category = "0.9.0"
+serde = { version = "1", features = ["derive", "rc"], optional = true }
 strum = { version = "0.25.0", features = ["derive"] }
 thiserror = "1.0.44"
 
