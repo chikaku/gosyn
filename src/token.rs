@@ -4,7 +4,11 @@ use std::fmt::{Debug, Formatter};
 use strum::EnumString;
 use strum::IntoStaticStr;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 #[derive(Copy, Clone, Eq, PartialEq, Debug, EnumString, IntoStaticStr)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Operator {
     #[strum(serialize = "+")]
     Add,
@@ -113,6 +117,7 @@ pub enum Operator {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, EnumString, IntoStaticStr)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Keyword {
     #[strum(serialize = "break")]
     Break,
@@ -171,6 +176,7 @@ pub enum Keyword {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum LitKind {
     Ident,
     String,

@@ -8,13 +8,18 @@ use std::fmt::Debug;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Comment {
     pub pos: usize,
     pub text: String,
 }
 
 #[derive(Default, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Ident {
     pub pos: usize,
     pub name: String,
@@ -23,12 +28,14 @@ pub struct Ident {
 // ================ Type Definition ================
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PointerType {
     pub pos: usize,
     pub typ: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ArrayType {
     pub pos: (usize, usize),
     pub len: Box<Expression>,
@@ -36,12 +43,14 @@ pub struct ArrayType {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SliceType {
     pub pos: (usize, usize),
     pub typ: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MapType {
     pub pos: (usize, usize),
     pub key: Box<Expression>,
@@ -49,6 +58,7 @@ pub struct MapType {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Field {
     pub name: Vec<Ident>,
     pub typ: Expression,
@@ -57,18 +67,21 @@ pub struct Field {
 }
 
 #[derive(Default, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FieldList {
     pub pos: Option<(usize, usize)>,
     pub list: Vec<Field>,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct StructType {
     pub pos: (usize, usize),
     pub fields: Vec<Field>,
 }
 
 #[derive(Default, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FuncType {
     pub pos: usize,
     pub typ_params: FieldList,
@@ -77,12 +90,14 @@ pub struct FuncType {
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ChanMode {
     Send,
     Recv,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ChannelType {
     pub pos: (usize, usize), // chan, <-
     pub dir: Option<ChanMode>,
@@ -90,6 +105,7 @@ pub struct ChannelType {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct InterfaceType {
     pub pos: usize,
     pub methods: FieldList,
@@ -98,6 +114,7 @@ pub struct InterfaceType {
 // ================ Expression Definition ================
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BasicLit {
     pub pos: usize,
     pub kind: LitKind,
@@ -105,42 +122,49 @@ pub struct BasicLit {
 }
 
 #[derive(Default, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct StringLit {
     pub pos: usize,
     pub value: String,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FuncLit {
     pub typ: FuncType,
     pub body: BlockStmt,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Element {
     Expr(Expression),
     LitValue(LiteralValue),
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct KeyedElement {
     pub key: Option<Element>,
     pub val: Element,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LiteralValue {
     pub pos: (usize, usize),
     pub values: Vec<KeyedElement>,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CompositeLit {
     pub typ: Box<Expression>,
     pub val: LiteralValue,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Selector {
     pub pos: usize,
     pub x: Box<Expression>,
@@ -148,6 +172,7 @@ pub struct Selector {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TypeAssertion {
     pub pos: (usize, usize),
     pub left: Box<Expression>,
@@ -155,6 +180,7 @@ pub struct TypeAssertion {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Index {
     pub pos: (usize, usize),
     pub left: Box<Expression>,
@@ -162,6 +188,7 @@ pub struct Index {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct IndexList {
     pub pos: (usize, usize),
     pub left: Box<Expression>,
@@ -169,6 +196,7 @@ pub struct IndexList {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Slice {
     pub pos: (usize, usize),
     pub left: Box<Expression>,
@@ -176,6 +204,7 @@ pub struct Slice {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Call {
     pub pos: (usize, usize), // third pos > 0 means the ellipsis argument
     pub args: Vec<Expression>,
@@ -184,30 +213,35 @@ pub struct Call {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ParenExpression {
     pub pos: (usize, usize),
     pub expr: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct StarExpression {
     pub pos: usize,
     pub right: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Ellipsis {
     pub pos: usize,
     pub elt: Option<Box<Expression>>,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RangeExpr {
     pub pos: usize, // pos of 'range'
     pub right: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Operation {
     pub pos: usize,
     pub op: Operator,
@@ -216,6 +250,7 @@ pub struct Operation {
 }
 
 #[derive(Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Expression {
     Call(Call),
     Index(Index),
@@ -246,6 +281,7 @@ pub enum Expression {
 // ================ Declaration Definition ================
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Decl<T> {
     pub docs: Vec<Rc<Comment>>,
     pub pos0: usize,                  // pos of var | const | type
@@ -254,6 +290,7 @@ pub struct Decl<T> {
 }
 
 #[derive(Default, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct VarSpec {
     pub docs: Vec<Rc<Comment>>,
     pub name: Vec<Ident>,
@@ -262,6 +299,7 @@ pub struct VarSpec {
 }
 
 #[derive(Default, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ConstSpec {
     pub docs: Vec<Rc<Comment>>,
     pub name: Vec<Ident>,
@@ -270,6 +308,7 @@ pub struct ConstSpec {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TypeSpec {
     pub docs: Vec<Rc<Comment>>,
     pub alias: bool,
@@ -279,6 +318,7 @@ pub struct TypeSpec {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FuncDecl {
     pub docs: Vec<Rc<Comment>>,
     pub recv: Option<FieldList>,
@@ -288,6 +328,7 @@ pub struct FuncDecl {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Declaration {
     Function(FuncDecl),
     Type(Decl<TypeSpec>),
@@ -298,12 +339,14 @@ pub enum Declaration {
 // ================ Statement Definition ================
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BlockStmt {
     pub pos: (usize, usize),
     pub list: Vec<Statement>,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DeclStmt {
     Type(Decl<TypeSpec>),
     Const(Decl<ConstSpec>),
@@ -311,24 +354,28 @@ pub enum DeclStmt {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GoStmt {
     pub pos: usize,
     pub call: Call,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DeferStmt {
     pub pos: usize,
     pub call: Call,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ReturnStmt {
     pub pos: usize,
     pub ret: Vec<Expression>,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BranchStmt {
     pub pos: usize,
     pub key: Keyword,
@@ -336,6 +383,7 @@ pub struct BranchStmt {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct IfStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
@@ -345,6 +393,7 @@ pub struct IfStmt {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AssignStmt {
     // position of assign operator like = | += | &=
     pub pos: usize,
@@ -354,6 +403,7 @@ pub struct AssignStmt {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LabeledStmt {
     pub pos: usize,
     pub name: Ident,
@@ -361,6 +411,7 @@ pub struct LabeledStmt {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SendStmt {
     pub pos: usize,
     pub chan: Expression,
@@ -368,11 +419,13 @@ pub struct SendStmt {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ExprStmt {
     pub expr: Expression,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CaseClause {
     pub tok: Keyword,
     pub pos: (usize, usize),
@@ -381,12 +434,14 @@ pub struct CaseClause {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CaseBlock {
     pub pos: (usize, usize),
     pub body: Vec<CaseClause>,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SwitchStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
@@ -395,6 +450,7 @@ pub struct SwitchStmt {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TypeSwitchStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
@@ -403,6 +459,7 @@ pub struct TypeSwitchStmt {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct IncDecStmt {
     pub pos: usize,
     pub op: Operator,
@@ -410,6 +467,7 @@ pub struct IncDecStmt {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CommClause {
     pub pos: (usize, usize), // pos of (keyword, colon)
     pub tok: Keyword,
@@ -418,18 +476,21 @@ pub struct CommClause {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CommBlock {
     pub pos: (usize, usize),
     pub body: Vec<CommClause>,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SelectStmt {
     pub pos: usize,
     pub body: CommBlock,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RangeStmt {
     pub pos: (usize, usize), // pos of (for, range)
     pub key: Option<Expression>,
@@ -440,6 +501,7 @@ pub struct RangeStmt {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ForStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
@@ -449,12 +511,14 @@ pub struct ForStmt {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct EmptyStmt {
     pub pos: usize,
 }
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Statement {
     Go(GoStmt),
     If(IfStmt),
@@ -477,12 +541,14 @@ pub enum Statement {
 }
 
 #[derive(Default, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Import {
     pub name: Option<Ident>,
     pub path: StringLit,
 }
 
 #[derive(Default, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct File {
     pub path: PathBuf,
     pub line_info: Vec<usize>,
@@ -494,6 +560,7 @@ pub struct File {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Package {
     pub path: PathBuf,
     pub files: Vec<File>,
