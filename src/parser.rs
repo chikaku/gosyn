@@ -1632,7 +1632,7 @@ impl Parser {
                 let (pos, list) = (fields.pos(), &fields.list);
 
                 for (index, field) in list.iter().enumerate() {
-                    if !field.name.is_empty() != named {
+                    if field.name.is_empty() == named {
                         return Err(self.else_error_at(pos, "mixed named and unnamed parameters"));
                     }
 
@@ -2519,7 +2519,7 @@ mod test {
 
         let type_struct = |s| match typ(s)?.typ {
             ast::Expression::TypeStruct(s) => Ok(s),
-            _ => return Err(anyhow::anyhow!("not type STRUCT")),
+            _ => Err(anyhow::anyhow!("not type STRUCT")),
         };
 
         type_struct("type s struct{a struct{}}")?;
@@ -2858,7 +2858,7 @@ mod test {
             let mut parser = new_started_parser(s);
             match parser.parse_simple_stmt()? {
                 ast::Statement::Assign(assign) => {
-                    if !parser.next()?.is_none() {
+                    if parser.next()?.is_some() {
                         return Err(anyhow::anyhow!("parser is not ended"));
                     }
                     if assign.left.len() != l_len {
@@ -3210,7 +3210,7 @@ mod test {
         let code = include_str!("../tests/testdata/func_docs.go");
         let ast = Parser::from(code).parse_file()?;
 
-        match ast.decl.get(0) {
+        match ast.decl.first() {
             Some(Declaration::Function(x)) => {
                 assert_eq!(
                     x.docs[0].to_owned().text,

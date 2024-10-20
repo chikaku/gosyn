@@ -1,11 +1,11 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 
-fn next_nchar0(source: &String, n: usize) -> String {
+fn next_nchar0(source: &str, n: usize) -> String {
     let source = &source[4..];
     source.chars().take(n).collect()
 }
 
-fn next_nchar1(chars_indices: &Vec<(usize, char)>, n: usize) -> String {
+fn next_nchar1(chars_indices: &[(usize, char)], n: usize) -> String {
     chars_indices[1..]
         .iter()
         .map(|(_, ch)| ch)

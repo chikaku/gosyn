@@ -28,7 +28,7 @@ fn pprof_parser() -> anyhow::Result<()> {
     let guard = pprof::ProfilerGuard::new(1000).unwrap();
 
     let mut total = Duration::from_millis(0);
-    while let Some(path) = wlk.next()? {
+    while let Some(path) = wlk.next_file()? {
         let elapsed = parse_source(&path)?;
         println!("  {:?} {:?}ms", &path, elapsed.as_millis());
         total += elapsed;
@@ -46,22 +46,19 @@ fn pprof_parser() -> anyhow::Result<()> {
 #[test]
 fn test_third_party_projects() -> anyhow::Result<()> {
     match env::var("GOSYN_THIRD_PARTY") {
-        Ok(val) => val
-            .split(";")
-            .map(|dir| -> anyhow::Result<()> {
-                let mut walk = Walkdir::new(dir)?.with_ext([".go"], [".pb.go"])?;
-                println!("parsing {} ...", dir);
-                while let Some(path) = walk.next()? {
-                    println!(
-                        "  {}: {}μs",
-                        path.as_path().strip_prefix(&dir).unwrap().display(),
-                        parse_source(&path)?.as_micros(),
-                    );
-                }
-                Ok(())
-            })
-            .collect(),
-        _ => return Ok(()),
+        Ok(val) => val.split(";").try_for_each(|dir| -> anyhow::Result<()> {
+            let mut walk = Walkdir::new(dir)?.with_ext([".go"], [".pb.go"])?;
+            println!("parsing {} ...", dir);
+            while let Some(path) = walk.next_file()? {
+                println!(
+                    "  {}: {}μs",
+                    path.as_path().strip_prefix(dir).unwrap().display(),
+                    parse_source(&path)?.as_micros(),
+                );
+            }
+            Ok(())
+        }),
+        _ => Ok(()),
     }
 }
 

@@ -24,24 +24,24 @@ impl Walkdir {
         Ok(Walkext { dir, include, exclude })
     }
 
-    pub fn next(&mut self) -> io::Result<Option<PathBuf>> {
+    pub fn next_file(&mut self) -> io::Result<Option<PathBuf>> {
         match self.dirs.pop() {
             None => Ok(None),
             Some(mut dir) => match dir.next() {
-                None => self.next(),
+                None => self.next_file(),
                 Some(entry) => {
                     self.dirs.push(dir);
                     match entry {
                         Err(err) => Err(err),
                         Ok(file) => match file.path() {
-                            path if path.ends_with("testdata") => self.next(),
+                            path if path.ends_with("testdata") => self.next_file(),
                             path if path.is_file() => Ok(Some(path)),
                             path if path.is_dir() => {
                                 let dir2 = path.read_dir()?;
                                 self.dirs.push(dir2);
-                                return self.next();
+                                self.next_file()
                             }
-                            _ => self.next(),
+                            _ => self.next_file(),
                         },
                     }
                 }
@@ -58,13 +58,13 @@ pub struct Walkext<S: AsRef<OsStr>, const N1: usize, const N2: usize> {
 }
 
 impl<S: AsRef<OsStr>, const N1: usize, const N2: usize> Walkext<S, N1, N2> {
-    pub fn next(&mut self) -> io::Result<Option<PathBuf>> {
-        while let Some(file) = self.dir.next()? {
+    pub fn next_file(&mut self) -> io::Result<Option<PathBuf>> {
+        while let Some(file) = self.dir.next_file()? {
             if !self.include.iter().any(|ext| {
                 // TODO: find better way to compare path extension
                 let ext = ext.as_ref().to_str().unwrap();
                 let filename = file.to_str().unwrap();
-                return filename.ends_with(ext);
+                filename.ends_with(ext)
             }) {
                 continue;
             }
@@ -72,7 +72,7 @@ impl<S: AsRef<OsStr>, const N1: usize, const N2: usize> Walkext<S, N1, N2> {
             if self.exclude.iter().any(|ext| {
                 let ext = ext.as_ref().to_str().unwrap();
                 let filename = file.to_str().unwrap();
-                return filename.ends_with(ext);
+                filename.ends_with(ext)
             }) {
                 continue;
             }
@@ -99,13 +99,13 @@ mod tests {
 
         println!("list all files...");
         let mut walk = Walkdir::new(&dir)?;
-        while let Ok(Some(path)) = walk.next() {
+        while let Ok(Some(path)) = walk.next_file() {
             println!("{:?}", path);
         }
 
         println!("list go files...");
         let mut walk = Walkdir::new(&dir)?.with_ext(["go"], [])?;
-        while let Ok(Some(path)) = walk.next() {
+        while let Ok(Some(path)) = walk.next_file() {
             println!("{:?}", path);
         }
 

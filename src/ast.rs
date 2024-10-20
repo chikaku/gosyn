@@ -327,6 +327,7 @@ pub struct FuncDecl {
     pub body: Option<BlockStmt>,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Declaration {
