@@ -397,10 +397,11 @@ impl Parser {
             .map_or(Ok(None), |x| x.map(Some))?;
 
         let name = self.identifier()?;
-        let typ_params = (recv.is_none() && self.current_is(Operator::BarackLeft))
-            .then(|| self.parse_type_parameters())
-            .unwrap_or_else(|| Ok((Default::default(), false)))?
-            .0; // ignore extra comma
+        let typ_params = if recv.is_none() && self.current_is(Operator::BarackLeft) {
+            self.parse_type_parameters()?.0
+        } else {
+            Default::default()
+        };
 
         let params = self.parameters()?;
         let params = self.check_field_list(params, true)?;
@@ -1871,9 +1872,12 @@ impl Parser {
 
     fn parse_return_stmt(&mut self) -> Result<ast::ReturnStmt> {
         let pos = self.expect(Keyword::Return)?;
-        let ret = (self.current_not(Operator::SemiColon) && self.current_not(Operator::BraceRight))
-            .then(|| self.expression_list())
-            .unwrap_or(Ok(vec![]))?;
+        let ret = if self.current_not(Operator::SemiColon) && self.current_not(Operator::BraceRight)
+        {
+            self.expression_list()?
+        } else {
+            vec![]
+        };
 
         self.skipped(Operator::SemiColon)?;
         Ok(ast::ReturnStmt { pos, ret })

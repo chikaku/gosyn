@@ -13,12 +13,12 @@ license = "MIT"
 anyhow = "1.0"
 unic-ucd-category = "0.9.0"
 serde = { version = "1", features = ["derive", "rc"], optional = true }
-strum = { version = "0.25.0", features = ["derive"] }
-thiserror = "1.0.44"
+strum = { version = "0.27.1", features = ["derive"] }
+thiserror = "2.0.12"
 
 [dev-dependencies]
-pprof = { version = "0.11.0", features = ["flamegraph"] }
-criterion = "0.3"
+pprof = { version = "0.14.0", features = ["flamegraph"] }
+criterion = "0.5"
 
 [[bench]]
 name = "scanner"

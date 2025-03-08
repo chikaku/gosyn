@@ -3,3 +3,4 @@ Cargo.lock
 .idea
 .vscode
 go.work
+.DS_Store
