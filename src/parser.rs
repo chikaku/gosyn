@@ -701,11 +701,10 @@ impl Parser {
                 Ok(Some(ast::Expression::TypeInterface(typ)))
             }
 
-            Some((_, Token::Literal(LitKind::Ident, name))) => {
-                if name == "_" {
-                    return Ok(None);
-                }
-
+            Some((_, Token::Literal(LitKind::Ident, _))) => {
+                // `_` is a regular identifier syntactically; rejection of `_`
+                // in non-binding type positions is the type checker's job.
+                // Matches go/parser.
                 Ok(Some(self.qualified_ident(None)?))
             }
 
@@ -1305,10 +1304,16 @@ impl Parser {
         match &self.current {
             Some((_, Token::Operator(Operator::Comma))) => {
                 // [a, ...
+                // TypeArgs = "[" TypeList [ "," ] "]" -- allow trailing comma.
                 while self.skipped(Operator::Comma)? {
+                    if self.current_is(Operator::BarackRight) {
+                        break;
+                    }
                     index.push(Some(self.parse_next_level_expr()?));
                 }
-                Ok((Some(Operator::Comma), index))
+                // go/ast uses IndexListExpr only for >= 2 type args.
+                let op = (index.len() > 1).then_some(Operator::Comma);
+                Ok((op, index))
             }
             // [:a:... [a:...
             Some((_, Token::Operator(Operator::Colon))) => {
@@ -3228,5 +3233,96 @@ test-abc[bcd]
             }
             _ => Err(anyhow::anyhow!("no declaration found")),
         }
+    }
+
+    /// TypeArgs = "[" TypeList [ "," ] "]" -- gofmt emits the trailing comma
+    /// for multi-line lists.
+    #[test]
+    fn parse_trailing_comma_in_brackets() -> Result<()> {
+        let cases = [
+            // generic call, single line, trailing comma
+            "package p\nfunc F[T any, U any]() {}\nfunc _() { F[int, string,]() }\n",
+            // generic call, multi-line, trailing comma
+            "package p\nfunc F[T any, U any]() {}\nfunc _() {\n\tF[\n\t\tint, string,\n\t]()\n}\n",
+            // generic call, one type per line, trailing comma
+            "package p\nfunc F[T any, U any]() {}\nfunc _() {\n\tF[\n\t\tint,\n\t\tstring,\n\t]()\n}\n",
+            // composite literal with generic type instantiation
+            "package p\ntype S[A, B any] struct{}\nfunc _() {\n\t_ = &S[\n\t\tint, string,\n\t]{}\n}\n",
+            // three type arguments with trailing comma
+            "package p\nfunc R[A, B, C any]() {}\nfunc _() {\n\tR[\n\t\tint,\n\t\tstring,\n\t\tbool,\n\t]()\n}\n",
+            // single type argument with trailing comma
+            "package p\nfunc F[T any]() {}\nfunc _() { F[int,]() }\n",
+        ];
+        for src in cases {
+            Parser::from(src)
+                .parse_file()
+                .map_err(|e| anyhow::anyhow!("failed to parse {src:?}: {e}"))?;
+        }
+        Ok(())
+    }
+
+    /// No trailing comma -> ASI inserts `;` after the last identifier ->
+    /// invalid Go. Pin that gosyn keeps rejecting it.
+    #[test]
+    fn parse_multiline_brackets_without_trailing_comma_rejected() {
+        let src =
+            "package p\nfunc F[T any, U any]() {}\nfunc _() {\n\tF[\n\t\tint, string\n\t]()\n}\n";
+        assert!(Parser::from(src).parse_file().is_err());
+    }
+
+    /// `Foo[a,]` must parse as Index, not IndexList[1] -- matches go/ast.
+    #[test]
+    fn parse_single_arg_trailing_comma_yields_index_not_indexlist() -> Result<()> {
+        let src = "package p\nfunc F[T any]() {}\nfunc _() { F[int,]() }\n";
+        let file = Parser::from(src).parse_file()?;
+        let func = match file.decl.last() {
+            Some(Declaration::Function(f)) => f,
+            _ => return Err(anyhow::anyhow!("expected function declaration")),
+        };
+        let body = func
+            .body
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("expected function body"))?;
+        let call_expr = match body.list.first() {
+            Some(ast::Statement::Expr(e)) => &e.expr,
+            other => {
+                return Err(anyhow::anyhow!(
+                    "expected expression statement, got {other:?}"
+                ))
+            }
+        };
+        let call = match call_expr {
+            Expression::Call(c) => c,
+            other => return Err(anyhow::anyhow!("expected call expression, got {other:?}")),
+        };
+        match &*call.func {
+            Expression::Index(_) => Ok(()),
+            Expression::IndexList(_) => Err(anyhow::anyhow!(
+                "F[int,] must parse as Index, not IndexList (matches go/ast)"
+            )),
+            other => Err(anyhow::anyhow!("unexpected node: {other:?}")),
+        }
+    }
+
+    /// `_` in type-arg position is valid Go (e.g. `func (b *Box[_]) M()`);
+    /// go/parser accepts it and defers rejection to the type checker.
+    #[test]
+    fn parse_blank_identifier_in_type_args() -> Result<()> {
+        let cases = [
+            // single blank in receiver
+            "package p\ntype Box[T any] struct{}\nfunc (b *Box[_]) Hello() {}\n",
+            // mixed list with blank as the second name
+            "package p\ntype Cache[K, V any] struct{}\nfunc (c *Cache[K, _]) Keys() []K { return nil }\n",
+            // blank in expression-context generic instantiation
+            "package p\ntype Box[T any] struct{}\nvar _ Box[_]\n",
+            // pre-existing accepted form: blank in type-parameter declaration
+            "package p\ntype Box[_ any] struct{}\n",
+        ];
+        for src in cases {
+            Parser::from(src)
+                .parse_file()
+                .map_err(|e| anyhow::anyhow!("failed to parse {src:?}: {e}"))?;
+        }
+        Ok(())
     }
 }
