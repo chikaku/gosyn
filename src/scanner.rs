@@ -107,11 +107,14 @@ impl Scanner {
         self.chars.get(self.pos + skp).copied()
     }
 
-    fn next_nstr(&mut self, n: usize) -> &str {
+    fn next_nstr(&self, n: usize) -> &str {
         let start = self.indices[self.pos];
-        let end = (start + n).min(self.source.len());
-        let part = &self.source.as_bytes()[start..end];
-        unsafe { std::str::from_utf8_unchecked(part) }
+        let end = self
+            .indices
+            .get(self.pos + n)
+            .copied()
+            .unwrap_or(self.source.len());
+        &self.source[start..end]
     }
 
     #[rustfmt::skip]
@@ -462,7 +465,7 @@ impl Scanner {
             Some(_) => {
                 let next2 = String::from(self.next_nstr(2));
                 match next2.as_str() {
-                    "0b" | "oB" => (2, self.scan_digits(2, next2, is_binary_digit)),
+                    "0b" | "0B" => (2, self.scan_digits(2, next2, is_binary_digit)),
                     "0o" | "0O" => (8, self.scan_digits(2, next2, is_decimal_digit)),
                     "0x" | "0X" => (16, self.scan_digits(2, next2, is_hex_digit)),
                     _ => (10, self.scan_digits(0, String::new(), is_decimal_digit)),
@@ -515,15 +518,7 @@ impl Scanner {
                 numlit.push(signed);
             }
 
-            self.scan_digits2(
-                numlit.len(),
-                &mut numlit,
-                if radix == 16 {
-                    is_hex_digit
-                } else {
-                    is_decimal_digit
-                },
-            )
+            self.scan_digits2(numlit.len(), &mut numlit, is_decimal_digit)
         }
 
         let exp_part = &numlit[exp_start..];
@@ -552,7 +547,7 @@ impl Scanner {
         let char_count = numlit.len();
         if self.next_char(char_count) == Some('i') {
             Ok((Token::Literal(LitKind::Imag, numlit + "i"), char_count + 1))
-        } else if numlit.find('.').is_some() {
+        } else if numlit.find('.').is_some() || !exp_part.is_empty() {
             Ok((Token::Literal(LitKind::Float, numlit), char_count))
         } else {
             Ok((Token::Literal(LitKind::Integer, numlit), char_count))
@@ -606,6 +601,7 @@ fn is_escaped_char(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::Scanner;
+    use crate::token::LitKind;
     use crate::token::Operator;
     use crate::token::Token;
 
@@ -658,6 +654,19 @@ mod tests {
     }
 
     #[test]
+    fn scan_lookahead_preserves_utf8_boundaries() {
+        assert_eq!(Scanner::from("a本").next_nstr(3), "a本");
+        assert_eq!(Scanner::from("本a").next_nstr(2), "本a");
+        assert_eq!(Scanner::from("本ab").next_nstr(2), "本a");
+        assert_eq!(Scanner::from(">>=本").next_nstr(3), ">>=");
+
+        for source in ["a本", "本+", "本==字", "a本+"] {
+            let mut scanner = Scanner::from(source);
+            while scanner.next_token().unwrap().is_some() {}
+        }
+    }
+
+    #[test]
     fn scan_lit_number() {
         let numeric = |s: &str| {
             let mut sc = Scanner::from(s);
@@ -675,6 +684,8 @@ mod tests {
         assert!(numeric("0_600").is_ok());
         assert!(numeric("0o600").is_ok());
         assert!(numeric("0O600").is_ok());
+        assert!(numeric("0b1010").is_ok());
+        assert!(numeric("0B1010").is_ok());
         assert!(numeric("0xBadFace").is_ok());
         assert!(numeric("0xBad_Face").is_ok());
         assert!(numeric("0x_67_7a_2f_cc_40_c6").is_ok());
@@ -703,6 +714,7 @@ mod tests {
         assert!(numeric("0X.8p-0").is_ok());
         assert!(numeric("0x1.Fp+0").is_ok());
         assert!(numeric("0X_1FFFP-16").is_ok());
+        assert!(numeric("0x1p1_0").is_ok());
 
         assert!(numeric("1p-2").is_err());
         assert!(numeric("1_.5").is_err());
@@ -713,6 +725,27 @@ mod tests {
         assert!(numeric("1.5e1_").is_err());
         assert!(numeric("1.5e+_1").is_err());
         assert!(numeric("0x1.5e-2").is_err());
+        assert!(numeric("0x1p1a").is_err());
+        assert!(numeric("0x1.0p1a").is_err());
+        assert!(numeric("0X.8Pdead").is_err());
+
+        let numeric_kind = |s: &str| match numeric(s).unwrap() {
+            Token::Literal(kind, value) => {
+                assert_eq!(value, s);
+                kind
+            }
+            token => panic!("expected numeric literal, got {token:?}"),
+        };
+
+        for literal in ["1e5", "2E10", "1e+5", "1e1_0", "0x1p-2", "0X1P+2"] {
+            assert_eq!(numeric_kind(literal), LitKind::Float, "{literal}");
+        }
+        for literal in ["1", "42", "0B1010", "0x15e", "0xdead"] {
+            assert_eq!(numeric_kind(literal), LitKind::Integer, "{literal}");
+        }
+        for literal in ["1e5i", "0x1p-2i"] {
+            assert_eq!(numeric_kind(literal), LitKind::Imag, "{literal}");
+        }
 
         assert!(numeric("0i").is_ok());
         assert!(numeric("0.i").is_ok());

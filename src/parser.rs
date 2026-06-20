@@ -2041,13 +2041,19 @@ impl Parser {
             Some(ast::Statement::Assign(assign)) => {
                 assign.left.len() == 1
                     && assign.right.len() == 1
-                    && matches!(assign.right.first(), Some(ast::Expression::TypeAssert(..)))
+                    && matches!(
+                        assign.right.first(),
+                        Some(ast::Expression::TypeAssert(ast::TypeAssertion {
+                            right: None,
+                            ..
+                        }))
+                    )
                     && match assign.op {
                         Operator::Define => true,
                         Operator::Assign => {
                             return Err(self.else_error_at(assign.pos, "expect := found ="))
                         }
-                        _ => unreachable!(),
+                        _ => false,
                     }
             }
             _ => false,
@@ -2635,6 +2641,19 @@ mod test {
     }
 
     #[test]
+    fn parse_numeric_literal_files() {
+        for literal in ["1e5", "2E10", "0x1p-2", "0X1P+2", "0B1010"] {
+            let source = format!("package p\nvar x = {literal}\n");
+            assert!(Parser::from(source).parse_file().is_ok(), "{literal}");
+        }
+
+        for literal in ["0x1p1a", "0x1.0p1a", "0X.8Pdead"] {
+            let source = format!("package p\nvar x = {literal}\n");
+            assert!(Parser::from(source).parse_file().is_err(), "{literal}");
+        }
+    }
+
+    #[test]
     fn parse_operand() -> Result<()> {
         let operand = |s| new_started_parser(s).operand();
 
@@ -3143,6 +3162,30 @@ mod test {
         )?;
         assert!(swt.init.is_none());
         assert!(swt.tag.is_some());
+
+        for source in [
+            "switch x := v.(int) {}",
+            "switch x := v.(*T) {}",
+            "switch x := v.(interface{}) {}",
+            "switch x = v.(type) {}",
+        ] {
+            assert!(
+                new_started_parser(source).parse_switch_stmt().is_err(),
+                "{source}"
+            );
+        }
+
+        for op in [
+            "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", "&^=",
+        ] {
+            for assertion in ["int", "type"] {
+                let source = format!("switch x {op} v.({assertion}) {{}}");
+                assert!(
+                    new_started_parser(&source).parse_switch_stmt().is_err(),
+                    "{source}"
+                );
+            }
+        }
 
         Ok(())
     }
