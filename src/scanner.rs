@@ -131,7 +131,6 @@ impl Scanner {
             | &Token::Keyword(Keyword::Return)
             | &Token::Keyword(Keyword::Continue)
             | &Token::Keyword(Keyword::FallThrough)
-            | &Token::Keyword(Keyword::Package)
         )
     }
 
@@ -328,7 +327,7 @@ impl Scanner {
         &self.chars[start..end]
     }
 
-    fn scan_rune(&mut self, start_at: usize) -> Result<Vec<char>> {
+    fn scan_rune(&mut self, start_at: usize, quote: char) -> Result<Vec<char>> {
         let mut chars = self.chars[start_at..].iter().copied();
         let (next1, next2) = (chars.next(), chars.next());
 
@@ -354,7 +353,7 @@ impl Scanner {
                 Some('u') => match_n(4, is_hex_digit)?,
                 Some('U') => match_n(8, is_hex_digit)?,
                 Some(ch) if is_octal_digit(ch) => match_n(2, is_octal_digit)?,
-                Some(ch) if is_escaped_char(ch) => return Ok(vec!['\\', ch]),
+                Some(ch) if is_escaped_char(ch, quote) => return Ok(vec!['\\', ch]),
                 Some(_) => return Err(self.error("unknown escape sequence")),
                 None => return Err(self.error("literal not terminated")),
             },
@@ -364,20 +363,16 @@ impl Scanner {
         };
 
         let es_sequence = [vec![next1.unwrap(), next2.unwrap()], es_sequence].concat();
-        match es_sequence.get(1).unwrap() {
-            'x' | 'u' | 'U' => Some((16, &es_sequence[2..])),
-            _ => Some((8, &es_sequence[1..])), // here must be octal_digit
+        let (radix, sequence) = match es_sequence.get(1).unwrap() {
+            'x' | 'u' | 'U' => (16, &es_sequence[2..]),
+            _ => (8, &es_sequence[1..]), // here must be octal_digit
+        };
+        let value = u32::from_str_radix(&String::from_iter(sequence), radix)
+            .expect("here must be a valid u32");
+        if radix == 8 && value > u8::MAX.into() {
+            return Err(self.error("octal escape value exceeds 255"));
         }
-        .and_then(|(radix, sequence)| {
-            // a valid rust char must be a valid go rune
-            // hence we do not check char ranges
-            // see comment for `is_unicode_char`
-            char::from_u32(
-                u32::from_str_radix(&String::from_iter(sequence), radix)
-                    .expect("here must be a valid u32"),
-            )
-        })
-        .ok_or_else(|| self.error("invalid Unicode code point"))?;
+        char::from_u32(value).ok_or_else(|| self.error("invalid Unicode code point"))?;
 
         Ok(es_sequence)
     }
@@ -386,7 +381,7 @@ impl Scanner {
         let chars = &self.chars;
         assert_eq!(&chars[self.pos], &'\'');
 
-        let mut rune = self.scan_rune(self.pos + 1)?;
+        let mut rune = self.scan_rune(self.pos + 1, '\'')?;
         match self.chars.get(self.pos + 1 + rune.len()) {
             Some('\'') => {
                 let mut res = vec!['\''];
@@ -416,7 +411,7 @@ impl Scanner {
             let end = self.chars.len();
             let mut pos = self.pos + 1;
             while pos < end {
-                let mut rune = self.scan_rune(pos)?;
+                let mut rune = self.scan_rune(pos, quote)?;
                 pos += rune.len();
                 let quit = rune.len() == 1 && rune[0] == quote;
                 result.append(&mut rune);
@@ -460,15 +455,15 @@ impl Scanner {
 
     fn scan_lit_number(&mut self) -> Result<(Token, usize)> {
         // integer part
-        let (radix, mut numlit) = match self.next_char(0) {
-            Some('.') | None => (10, String::new()),
+        let (radix, prefix_len, mut numlit) = match self.next_char(0) {
+            Some('.') | None => (10, 0, String::new()),
             Some(_) => {
                 let next2 = String::from(self.next_nstr(2));
                 match next2.as_str() {
-                    "0b" | "0B" => (2, self.scan_digits(2, next2, is_binary_digit)),
-                    "0o" | "0O" => (8, self.scan_digits(2, next2, is_decimal_digit)),
-                    "0x" | "0X" => (16, self.scan_digits(2, next2, is_hex_digit)),
-                    _ => (10, self.scan_digits(0, String::new(), is_decimal_digit)),
+                    "0b" | "0B" => (2, 2, self.scan_digits(2, next2, is_binary_digit)),
+                    "0o" | "0O" => (8, 2, self.scan_digits(2, next2, is_octal_digit)),
+                    "0x" | "0X" => (16, 2, self.scan_digits(2, next2, is_hex_digit)),
+                    _ => (10, 0, self.scan_digits(0, String::new(), is_decimal_digit)),
                 }
             }
         };
@@ -495,13 +490,30 @@ impl Scanner {
             return Err(self.error_at(self.pos + fac_start, "'_' must separate successive digits"));
         }
 
+        let valid_digit = match radix {
+            2 => is_binary_digit,
+            8 => is_octal_digit,
+            16 => is_hex_digit,
+            _ => is_decimal_digit,
+        };
+        if prefix_len != 0 && !numlit[prefix_len..].chars().any(valid_digit) {
+            return Err(self.error_at(self.pos + numlit.len(), "mantissa has no digits"));
+        }
+        if matches!(radix, 2 | 8)
+            && matches!(self.next_char(numlit.len()), Some(ch) if is_decimal_digit(ch))
+        {
+            return Err(self.error_at(self.pos + numlit.len(), "invalid digit for numeric base"));
+        }
+
         let skipped = numlit.len();
         let int_part = &numlit[..fac_start];
+        let invalid_legacy_octal = prefix_len == 0
+            && int_part.len() > 1
+            && int_part.starts_with('0')
+            && int_part.chars().any(|ch| matches!(ch, '8' | '9'));
         let next1 = self.next_char(fac_start);
         if numlit.is_empty() {
             return Err(self.error_at(self.pos + skipped, "invalid radix point"));
-        } else if radix == 16 && (int_part.len() == 2) && (fac_part.len() == 1) {
-            return Err(self.error_at(self.pos + skipped, "mantissa has no digits"));
         } else if radix != 10 && matches!(next1, Some('e' | 'E')) {
             return Err(self.error_at(self.pos + skipped, "E exponent requires decimal mantissa"));
         } else if radix != 16 && matches!(next1, Some('p' | 'P')) {
@@ -523,6 +535,9 @@ impl Scanner {
 
         let exp_part = &numlit[exp_start..];
         let fac_part = &numlit[fac_start..];
+        if !exp_part.is_empty() && !exp_part.chars().skip(1).any(is_decimal_digit) {
+            return Err(self.error_at(self.pos + numlit.len(), "exponent has no digits"));
+        }
         if radix == 16 && !fac_part.is_empty() && exp_part.is_empty() {
             return Err(self.error_at(
                 self.pos + skipped + exp_part.len(),
@@ -545,9 +560,15 @@ impl Scanner {
         }
 
         let char_count = numlit.len();
-        if self.next_char(char_count) == Some('i') {
+        let is_imaginary = self.next_char(char_count) == Some('i');
+        let is_float = numlit.contains('.') || !exp_part.is_empty();
+        if invalid_legacy_octal && !is_imaginary && !is_float {
+            return Err(self.error_at(self.pos + char_count, "invalid digit in octal literal"));
+        }
+
+        if is_imaginary {
             Ok((Token::Literal(LitKind::Imag, numlit + "i"), char_count + 1))
-        } else if numlit.find('.').is_some() || !exp_part.is_empty() {
+        } else if is_float {
             Ok((Token::Literal(LitKind::Float, numlit), char_count))
         } else {
             Ok((Token::Literal(LitKind::Integer, numlit), char_count))
@@ -594,8 +615,8 @@ fn is_hex_digit(c: char) -> bool {
     c.is_ascii_hexdigit()
 }
 
-fn is_escaped_char(c: char) -> bool {
-    ['a', 'b', 'f', 'n', 'r', 't', 'v', '\\', '\'', '"'].contains(&c)
+fn is_escaped_char(c: char, quote: char) -> bool {
+    ['a', 'b', 'f', 'n', 'r', 't', 'v', '\\'].contains(&c) || c == quote
 }
 
 #[cfg(test)]

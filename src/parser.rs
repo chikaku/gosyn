@@ -726,6 +726,9 @@ impl Parser {
     fn parse_type_parameters(&mut self) -> Result<(ast::FieldList, bool)> {
         let mut fs = ast::FieldList::default();
         let pos0 = self.expect(Operator::BarackLeft)?;
+        if self.current_is(Operator::BarackRight) {
+            return Err(self.else_error("type parameter list cannot be empty"));
+        }
 
         let mut extra_comma = false;
         while !self.current_is(Operator::BarackRight) {
@@ -1890,9 +1893,12 @@ impl Parser {
 
     fn parse_branch_stmt(&mut self, key: Keyword) -> Result<ast::BranchStmt> {
         let pos = self.expect(key)?;
-        let ident = ((key != Keyword::FallThrough) && self.current_is(LitKind::Ident))
-            .then(|| self.identifier())
-            .map_or(Ok(None), |r| r.map(Some))?;
+        let ident = match key {
+            Keyword::Goto => Some(self.identifier()?),
+            Keyword::FallThrough => None,
+            _ if self.current_is(LitKind::Ident) => Some(self.identifier()?),
+            _ => None,
+        };
 
         self.skipped(Operator::SemiColon)?;
         Ok(ast::BranchStmt { pos, key, ident })
