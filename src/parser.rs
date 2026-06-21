@@ -2484,6 +2484,52 @@ mod test {
     }
 
     #[test]
+    fn parse_iota_in_constant_expressions() -> Result<()> {
+        let mut parser = new_started_parser(
+            "const (
+                Flag = 1 << iota
+                Mask = 1<<(iota+1) - 1
+                KiB = 1 << (10 * iota)
+                MiB
+                GiB
+            )",
+        );
+        let declaration = parser.parse_decl(Parser::parse_const_spec)?;
+        finish(&mut parser)?;
+
+        assert_eq!(declaration.specs.len(), 5);
+
+        let [flag] = declaration.specs[0].values.as_slice() else {
+            return Err(anyhow::anyhow!("expected one Flag expression"));
+        };
+        let (_, iota) = assert_binary(flag, Operator::Shl);
+        assert_ident(iota, "iota");
+
+        let [mask] = declaration.specs[1].values.as_slice() else {
+            return Err(anyhow::anyhow!("expected one Mask expression"));
+        };
+        let (shift, _) = assert_binary(mask, Operator::Sub);
+        let (_, amount) = assert_binary(shift, Operator::Shl);
+        match amount {
+            Expression::Paren(paren) => {
+                let (iota, _) = assert_binary(&paren.expr, Operator::Add);
+                assert_ident(iota, "iota");
+            }
+            other => {
+                return Err(anyhow::anyhow!(
+                    "expected parenthesized shift, got {other:?}"
+                ))
+            }
+        }
+
+        assert_eq!(declaration.specs[2].values.len(), 1);
+        assert!(declaration.specs[3].values.is_empty());
+        assert!(declaration.specs[4].values.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
     fn parse_func_decl() -> Result<()> {
         let func = |s, (none_recv, type_params_len, params_len, result_len)| {
             let mut parser = new_started_parser(s);
@@ -2653,6 +2699,18 @@ mod test {
             other => return Err(anyhow::anyhow!("expected map alias, got {other:?}")),
         }
 
+        Ok(())
+    }
+
+    #[test]
+    fn parse_any_and_comparable_as_predeclared_identifiers() -> Result<()> {
+        let source = "package p
+            type Alias = any
+            type Set[T comparable] map[T]any
+            func identity(any any) any { return any }
+        ";
+
+        Parser::from(source).parse_file()?;
         Ok(())
     }
 
@@ -3044,6 +3102,40 @@ mod test {
     }
 
     #[test]
+    fn parse_interface_with_type_union_and_method() -> Result<()> {
+        let mut parser = new_started_parser("interface { ~T | ~U; Method() }");
+        let interface = parser.parse_interface_type()?;
+        finish(&mut parser)?;
+
+        let [type_element, method] = interface.methods.list.as_slice() else {
+            return Err(anyhow::anyhow!("expected one type element and one method"));
+        };
+
+        assert!(type_element.name.is_empty());
+        let (left, right) = assert_binary(&type_element.typ, Operator::Or);
+        for (term, expected) in [(left, "T"), (right, "U")] {
+            match term {
+                Expression::Operation(operation) => {
+                    assert_eq!(operation.op, Operator::Tiled);
+                    assert!(operation.y.is_none());
+                    assert_ident(&operation.x, expected);
+                }
+                other => {
+                    return Err(anyhow::anyhow!(
+                        "expected underlying type {expected}, got {other:?}"
+                    ))
+                }
+            }
+        }
+
+        assert_eq!(method.name.len(), 1);
+        assert_eq!(method.name[0].name, "Method");
+        assert!(matches!(method.typ, Expression::TypeFunction(_)));
+
+        Ok(())
+    }
+
+    #[test]
     fn parse_struct_type() -> Result<()> {
         let struct_ = |s| {
             let mut parser = new_started_parser(s);
@@ -3074,6 +3166,28 @@ mod test {
         assert!(struct_("struct {a, b}").is_err());
         assert!(struct_("struct {a ...int}").is_err());
         assert!(struct_("struct {a, b int, bool}").is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_receive_only_channel_struct_field() -> Result<()> {
+        let mut parser = new_started_parser("struct { events <-chan Event }");
+        let struct_type = parser.struct_type()?;
+        finish(&mut parser)?;
+
+        let [field] = struct_type.fields.as_slice() else {
+            return Err(anyhow::anyhow!("expected one struct field"));
+        };
+        assert_eq!(field.name.len(), 1);
+        assert_eq!(field.name[0].name, "events");
+        match &field.typ {
+            Expression::TypeChannel(channel) => {
+                assert_eq!(channel.dir, Some(ast::ChanMode::Recv));
+                assert_ident(&channel.typ, "Event");
+            }
+            other => return Err(anyhow::anyhow!("expected channel field, got {other:?}")),
+        }
 
         Ok(())
     }
