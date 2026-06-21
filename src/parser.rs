@@ -2344,6 +2344,7 @@ fn is_type_elem(expr: &ast::Expression) -> bool {
 mod test {
     use crate::ast::{self, Declaration, Expression};
     use crate::parser::Parser;
+    use crate::token::{Keyword, Operator};
 
     use anyhow::{Ok, Result};
 
@@ -2353,12 +2354,52 @@ mod test {
         parser
     }
 
+    fn finish(parser: &mut Parser) -> Result<()> {
+        parser.skipped(Operator::SemiColon)?;
+        match &parser.current {
+            None => Ok(()),
+            Some((pos, token)) => Err(anyhow::anyhow!("unconsumed token at {pos}: {token:?}")),
+        }
+    }
+
+    fn parse_expression_complete(source: &str) -> Result<Expression> {
+        let mut parser = Parser::from(source);
+        let expression = parser.expression()?;
+        finish(&mut parser)?;
+        Ok(expression)
+    }
+
+    fn parse_statement_complete(source: &str) -> Result<ast::Statement> {
+        let mut parser = Parser::from(source);
+        let statement = parser.parse_stmt()?;
+        finish(&mut parser)?;
+        Ok(statement)
+    }
+
+    fn assert_ident(expression: &Expression, expected: &str) {
+        match expression {
+            Expression::Ident(ident) => assert_eq!(ident.name, expected),
+            other => panic!("expected identifier {expected:?}, got {other:?}"),
+        }
+    }
+
+    fn assert_binary(expression: &Expression, expected: Operator) -> (&Expression, &Expression) {
+        match expression {
+            Expression::Operation(operation) => {
+                assert_eq!(operation.op, expected);
+                let right = operation.y.as_deref().expect("expected binary operation");
+                (&operation.x, right)
+            }
+            other => panic!("expected {expected:?} operation, got {other:?}"),
+        }
+    }
+
     #[test]
     fn parse_package() -> Result<()> {
         let pkg = |s| {
             let mut parser = new_started_parser(s);
             let pkg = parser.parse_package()?;
-            assert!(parser.next()?.is_none());
+            finish(&mut parser)?;
             Ok(pkg)
         };
 
@@ -2368,7 +2409,7 @@ mod test {
         assert!(pkg("package _").is_err());
         assert!(pkg("package\n_").is_err());
         assert!(pkg("package package").is_err());
-        assert!(pkg("package\n\nmain").is_err());
+        pkg("package\n\nmain")?;
 
         Ok(())
     }
@@ -2378,7 +2419,7 @@ mod test {
         let import = |s| {
             let mut parser = new_started_parser(s);
             let imp = parser.parse_import_decl()?;
-            assert!(parser.next()?.is_none());
+            finish(&mut parser)?;
             Ok(imp)
         };
 
@@ -2402,7 +2443,7 @@ mod test {
         let vars = |s| {
             let mut parser = new_started_parser(s);
             let vars = parser.parse_decl(Parser::parse_var_spec)?;
-            assert!(parser.next()?.is_none());
+            finish(&mut parser)?;
             Ok(vars)
         };
 
@@ -2421,7 +2462,7 @@ mod test {
         let consts = |s| {
             let mut parser = new_started_parser(s);
             let consts = parser.parse_decl(Parser::parse_const_spec)?;
-            assert!(parser.next()?.is_none());
+            finish(&mut parser)?;
             Ok(consts)
         };
 
@@ -2441,7 +2482,7 @@ mod test {
         let func = |s, (none_recv, type_params_len, params_len, result_len)| {
             let mut parser = new_started_parser(s);
             let func = parser.parse_func_decl()?;
-            assert!(parser.next()?.is_none());
+            finish(&mut parser)?;
 
             assert_eq!(func.recv.as_ref().map(|_| ()), none_recv);
             assert_eq!(func.typ.typ_params.list.len(), type_params_len);
@@ -2465,7 +2506,6 @@ mod test {
         func("func f(a, _ int, z float32) bool", (None, 0, 2, 1))?;
         func("func f(a, b int, z float32) (bool)", (None, 0, 2, 1))?;
         func("func f(prefix string, values ...int)", (None, 0, 2, 0))?;
-        func("func min[](x, y T) T { return Min(x, y) }", (None, 0, 1, 1))?;
         func("func min[S interface{ ~[]byte|string }]()", (None, 1, 0, 0))?;
 
         func(
@@ -2514,11 +2554,17 @@ mod test {
     }
 
     #[test]
+    fn reject_empty_type_parameter_list() {
+        let source = "package p\nfunc min[](x, y T) T { return x }\n";
+        assert!(Parser::from(source).parse_file().is_err());
+    }
+
+    #[test]
     fn parse_type_decl() -> Result<()> {
         let typ = |s| {
             let mut parser = new_started_parser(s);
             let mut typ = parser.parse_decl(Parser::parse_type_spec)?;
-            assert!(parser.next()?.is_none());
+            finish(&mut parser)?;
             Ok(typ.specs.pop().unwrap())
         };
 
@@ -2555,8 +2601,73 @@ mod test {
     }
 
     #[test]
+    fn parse_type_aliases() -> Result<()> {
+        let source = "package p
+            type Alias = Original
+            type Set[P comparable] = map[P]bool
+        ";
+        let file = Parser::from(source).parse_file()?;
+        let [Declaration::Type(alias_decl), Declaration::Type(set_decl)] = file.decl.as_slice()
+        else {
+            return Err(anyhow::anyhow!("expected two type declarations"));
+        };
+
+        let [alias] = alias_decl.specs.as_slice() else {
+            return Err(anyhow::anyhow!("expected one Alias spec"));
+        };
+        assert_eq!(alias.name.name, "Alias");
+        assert!(alias.alias);
+        assert!(alias.params.list.is_empty());
+        match &alias.typ {
+            Expression::Ident(ident) => assert_eq!(ident.name, "Original"),
+            other => return Err(anyhow::anyhow!("expected alias identifier, got {other:?}")),
+        }
+
+        let [set] = set_decl.specs.as_slice() else {
+            return Err(anyhow::anyhow!("expected one Set spec"));
+        };
+        assert_eq!(set.name.name, "Set");
+        assert!(set.alias);
+        assert_eq!(set.params.list.len(), 1);
+        assert_eq!(set.params.list[0].name.len(), 1);
+        assert_eq!(set.params.list[0].name[0].name, "P");
+        match &set.params.list[0].typ {
+            Expression::Ident(ident) => assert_eq!(ident.name, "comparable"),
+            other => {
+                return Err(anyhow::anyhow!(
+                    "expected comparable constraint, got {other:?}"
+                ))
+            }
+        }
+        match &set.typ {
+            Expression::TypeMap(map) => {
+                assert_ident(&map.key, "P");
+                assert_ident(&map.val, "bool");
+            }
+            other => return Err(anyhow::anyhow!("expected map alias, got {other:?}")),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn reject_empty_type_argument_lists() {
+        for source in [
+            "package p\nfunc F[T any]() {}\nfunc _() { F[]() }\n",
+            "package p\ntype Box[T any] struct{}\nvar _ Box[]\n",
+        ] {
+            assert!(Parser::from(source).parse_file().is_err(), "{source:?}");
+        }
+    }
+
+    #[test]
     fn parse_parameters() -> Result<()> {
-        let params = |s| new_started_parser(s).parameters();
+        let params = |s| {
+            let mut parser = new_started_parser(s);
+            let params = parser.parameters()?;
+            finish(&mut parser)?;
+            Ok(params)
+        };
 
         params("()")?;
         params("(S[T])")?;
@@ -2566,7 +2677,7 @@ mod test {
         params("(a,\n b,\n)")?;
         params("(a ...bool)")?;
         params("(a, b, c bool)")?;
-        params("(a.b, c.d) e.f")?;
+        params("(a.b, c.d)")?;
         params("(int, int, bool)")?;
         params("(a, b int, c bool)")?;
         params("(int, bool, ...int)")?;
@@ -2588,7 +2699,12 @@ mod test {
         assert!(check("(...int, ...bool)").is_err());
         assert!(check("(a, b, c, d ...int)").is_err());
 
-        let ret_params = |s| new_started_parser(s).parse_result();
+        let ret_params = |s| {
+            let mut parser = new_started_parser(s);
+            let params = parser.parse_result()?;
+            finish(&mut parser)?;
+            Ok(params)
+        };
 
         ret_params("(int)")?;
         ret_params("(a int)")?;
@@ -2610,7 +2726,7 @@ mod test {
 
     #[test]
     fn parse_expr() -> Result<()> {
-        let expr = |s| Parser::from(s).expression();
+        let expr = parse_expression_complete;
 
         expr("a + b")?;
         expr("a % b")?;
@@ -2641,6 +2757,155 @@ mod test {
     }
 
     #[test]
+    fn parse_all_expression_operators() -> Result<()> {
+        let binary = [
+            ("+", Operator::Add),
+            ("-", Operator::Sub),
+            ("*", Operator::Star),
+            ("/", Operator::Quo),
+            ("%", Operator::Rem),
+            ("&", Operator::And),
+            ("|", Operator::Or),
+            ("^", Operator::Xor),
+            ("<<", Operator::Shl),
+            (">>", Operator::Shr),
+            ("&^", Operator::AndNot),
+            ("&&", Operator::AndAnd),
+            ("||", Operator::OrOr),
+            ("==", Operator::Equal),
+            ("!=", Operator::NotEqual),
+            ("<", Operator::Less),
+            ("<=", Operator::LessEqual),
+            (">", Operator::Greater),
+            (">=", Operator::GreaterEqual),
+        ];
+
+        for (source, expected) in binary {
+            let expression = parse_expression_complete(&format!("left {source} right"))?;
+            let (left, right) = assert_binary(&expression, expected);
+            assert_ident(left, "left");
+            assert_ident(right, "right");
+        }
+
+        for (source, expected) in [
+            ("+value", Operator::Add),
+            ("-value", Operator::Sub),
+            ("*value", Operator::Star),
+            ("!value", Operator::Not),
+            ("^value", Operator::Xor),
+            ("&value", Operator::And),
+            ("<-value", Operator::Arrow),
+        ] {
+            match parse_expression_complete(source)? {
+                Expression::Operation(operation) => {
+                    assert_eq!(operation.op, expected, "{source}");
+                    assert!(operation.y.is_none(), "{source}");
+                    assert_ident(&operation.x, "value");
+                }
+                other => return Err(anyhow::anyhow!("unexpected AST for {source}: {other:?}")),
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_expression_precedence_and_associativity() -> Result<()> {
+        let expression = parse_expression_complete("a || b && c == d + e * f")?;
+        let (a, and) = assert_binary(&expression, Operator::OrOr);
+        assert_ident(a, "a");
+        let (b, equal) = assert_binary(and, Operator::AndAnd);
+        assert_ident(b, "b");
+        let (c, add) = assert_binary(equal, Operator::Equal);
+        assert_ident(c, "c");
+        let (d, multiply) = assert_binary(add, Operator::Add);
+        assert_ident(d, "d");
+        let (e, f) = assert_binary(multiply, Operator::Star);
+        assert_ident(e, "e");
+        assert_ident(f, "f");
+
+        let expression = parse_expression_complete("a - b - c")?;
+        let (subtract, c) = assert_binary(&expression, Operator::Sub);
+        let (a, b) = assert_binary(subtract, Operator::Sub);
+        assert_ident(a, "a");
+        assert_ident(b, "b");
+        assert_ident(c, "c");
+
+        let expression = parse_expression_complete("!-value")?;
+        match expression {
+            Expression::Operation(not) => {
+                assert_eq!(not.op, Operator::Not);
+                assert!(not.y.is_none());
+                match *not.x {
+                    Expression::Operation(negate) => {
+                        assert_eq!(negate.op, Operator::Sub);
+                        assert!(negate.y.is_none());
+                        assert_ident(&negate.x, "value");
+                    }
+                    other => return Err(anyhow::anyhow!("expected unary minus, got {other:?}")),
+                }
+            }
+            other => return Err(anyhow::anyhow!("expected unary not, got {other:?}")),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_primary_expression_ast_shapes() -> Result<()> {
+        match parse_expression_complete("pkg.Value")? {
+            Expression::Selector(selector) => {
+                assert_ident(&selector.x, "pkg");
+                assert_eq!(selector.sel.name, "Value");
+            }
+            other => return Err(anyhow::anyhow!("expected selector, got {other:?}")),
+        }
+
+        match parse_expression_complete("values[1]")? {
+            Expression::Index(index) => {
+                assert_ident(&index.left, "values");
+                assert!(matches!(*index.index, Expression::BasicLit(_)));
+            }
+            other => return Err(anyhow::anyhow!("expected index, got {other:?}")),
+        }
+
+        match parse_expression_complete("values[1:2:3]")? {
+            Expression::Slice(slice) => {
+                assert_ident(&slice.left, "values");
+                assert!(slice.index.iter().all(Option::is_some));
+            }
+            other => return Err(anyhow::anyhow!("expected slice, got {other:?}")),
+        }
+
+        match parse_expression_complete("Factory[int, string]")? {
+            Expression::IndexList(index) => {
+                assert_ident(&index.left, "Factory");
+                assert_eq!(index.indices.len(), 2);
+            }
+            other => return Err(anyhow::anyhow!("expected index list, got {other:?}")),
+        }
+
+        match parse_expression_complete("func(x int) int { return x }")? {
+            Expression::FuncLit(function) => {
+                assert_eq!(function.typ.params.list.len(), 1);
+                assert_eq!(function.typ.result.list.len(), 1);
+                assert_eq!(function.body.list.len(), 1);
+            }
+            other => return Err(anyhow::anyhow!("expected function literal, got {other:?}")),
+        }
+
+        match parse_expression_complete("map[string]int{\"one\": 1}")? {
+            Expression::CompositeLit(literal) => {
+                assert!(matches!(*literal.typ, Expression::TypeMap(_)));
+                assert_eq!(literal.val.values.len(), 1);
+            }
+            other => return Err(anyhow::anyhow!("expected composite literal, got {other:?}")),
+        }
+
+        Ok(())
+    }
+
+    #[test]
     fn parse_numeric_literal_files() {
         for literal in ["1e5", "2E10", "0x1p-2", "0X1P+2", "0B1010"] {
             let source = format!("package p\nvar x = {literal}\n");
@@ -2655,9 +2920,9 @@ mod test {
 
     #[test]
     fn parse_operand() -> Result<()> {
-        let operand = |s| new_started_parser(s).operand();
+        let operand = parse_expression_complete;
 
-        operand("a.b")?;
+        operand("a")?;
         operand("`Hola`")?;
         operand("[10]string{}")?;
         operand("[6]int{1, 2, 3, 5}")?;
@@ -2672,7 +2937,13 @@ mod test {
 
     #[test]
     fn parse_slice_index() -> Result<()> {
-        let slice = |s| new_started_parser(s).parse_slice_index_or_type_inst();
+        let slice = |s| {
+            let mut parser = new_started_parser(s);
+            let slice = parser.parse_slice_index_or_type_inst()?;
+            parser.expect(Operator::BarackRight)?;
+            finish(&mut parser)?;
+            Ok(slice)
+        };
 
         slice("[a]")?;
         slice("[:]")?;
@@ -2692,7 +2963,12 @@ mod test {
 
     #[test]
     fn parse_func_type() -> Result<()> {
-        let func = |s| new_started_parser(s).func_type();
+        let func = |s| {
+            let mut parser = new_started_parser(s);
+            let func = parser.func_type()?;
+            finish(&mut parser)?;
+            Ok(func)
+        };
 
         func("func()")?;
         func("func(x int) int")?;
@@ -2700,6 +2976,7 @@ mod test {
         func("func(a, _ int, z float32) bool")?;
         func("func(a, b int, z float32) (bool)")?;
         func("func(prefix string, values ...int)")?;
+        func("func(a.b, c.d) e.f")?;
         func("func(int, int, float64) (float64, *[]int)")?;
         func("func(int, int, float64) (*a, []b, map[c]d)")?;
 
@@ -2713,7 +2990,12 @@ mod test {
 
     #[test]
     fn parse_interface_type() -> Result<()> {
-        let interface = |s| new_started_parser(s).parse_interface_type();
+        let interface = |s| {
+            let mut parser = new_started_parser(s);
+            let interface = parser.parse_interface_type()?;
+            finish(&mut parser)?;
+            Ok(interface)
+        };
 
         interface("
         interface {
@@ -2757,7 +3039,12 @@ mod test {
 
     #[test]
     fn parse_struct_type() -> Result<()> {
-        let struct_ = |s| new_started_parser(s).struct_type();
+        let struct_ = |s| {
+            let mut parser = new_started_parser(s);
+            let struct_ = parser.struct_type()?;
+            finish(&mut parser)?;
+            Ok(struct_)
+        };
 
         struct_("struct {}")?;
         struct_("struct {T1}")?;
@@ -2791,7 +3078,7 @@ mod test {
             let mut parser = Parser::from(s);
             match parser.expression()? {
                 ast::Expression::Call(call) => {
-                    assert!(parser.next()?.is_none());
+                    finish(&mut parser)?;
                     Ok(call)
                 }
                 _ => Err(anyhow::anyhow!("not a CALL expression")),
@@ -2821,12 +3108,7 @@ mod test {
 
     #[test]
     fn parse_stmt() -> Result<()> {
-        let stmt = |s| {
-            let mut parser = Parser::from(s);
-            let stmt = parser.parse_stmt()?;
-            assert!(parser.next()?.is_none());
-            Ok(stmt)
-        };
+        let stmt = parse_statement_complete;
 
         match stmt("a <- b{c: c, d: d}")? {
             ast::Statement::Send(_) => {}
@@ -2881,14 +3163,129 @@ mod test {
     }
 
     #[test]
+    fn parse_all_statement_kinds() -> Result<()> {
+        assert!(matches!(
+            parse_statement_complete(";")?,
+            ast::Statement::Empty(_)
+        ));
+
+        match parse_statement_complete("Loop: for {}")? {
+            ast::Statement::Label(label) => {
+                assert_eq!(label.name.name, "Loop");
+                assert!(matches!(*label.stmt, ast::Statement::For(_)));
+            }
+            other => return Err(anyhow::anyhow!("expected label, got {other:?}")),
+        }
+
+        match parse_statement_complete("counter++")? {
+            ast::Statement::IncDec(statement) => {
+                assert_eq!(statement.op, Operator::Inc);
+                assert_ident(&statement.expr, "counter");
+            }
+            other => return Err(anyhow::anyhow!("expected increment, got {other:?}")),
+        }
+
+        match parse_statement_complete("counter--")? {
+            ast::Statement::IncDec(statement) => {
+                assert_eq!(statement.op, Operator::Dec);
+                assert_ident(&statement.expr, "counter");
+            }
+            other => return Err(anyhow::anyhow!("expected decrement, got {other:?}")),
+        }
+
+        match parse_statement_complete("go worker(1)")? {
+            ast::Statement::Go(statement) => assert_eq!(statement.call.args.len(), 1),
+            other => return Err(anyhow::anyhow!("expected go statement, got {other:?}")),
+        }
+
+        match parse_statement_complete("<-ready")? {
+            ast::Statement::Expr(statement) => match statement.expr {
+                Expression::Operation(operation) => {
+                    assert_eq!(operation.op, Operator::Arrow);
+                    assert!(operation.y.is_none());
+                }
+                other => {
+                    return Err(anyhow::anyhow!(
+                        "expected receive expression, got {other:?}"
+                    ))
+                }
+            },
+            other => {
+                return Err(anyhow::anyhow!(
+                    "expected expression statement, got {other:?}"
+                ))
+            }
+        }
+
+        for (source, expected, label) in [
+            ("break Outer", Keyword::Break, Some("Outer")),
+            ("continue", Keyword::Continue, None),
+            ("goto Done", Keyword::Goto, Some("Done")),
+            ("fallthrough", Keyword::FallThrough, None),
+        ] {
+            match parse_statement_complete(source)? {
+                ast::Statement::Branch(statement) => {
+                    assert_eq!(statement.key, expected, "{source}");
+                    assert_eq!(
+                        statement.ident.as_ref().map(|ident| ident.name.as_str()),
+                        label
+                    );
+                }
+                other => {
+                    return Err(anyhow::anyhow!(
+                        "expected branch statement for {source}, got {other:?}"
+                    ))
+                }
+            }
+        }
+
+        match parse_statement_complete("return first, second")? {
+            ast::Statement::Return(statement) => assert_eq!(statement.ret.len(), 2),
+            other => return Err(anyhow::anyhow!("expected return, got {other:?}")),
+        }
+
+        assert!(matches!(
+            parse_statement_complete("var value int")?,
+            ast::Statement::Declaration(ast::DeclStmt::Variable(_))
+        ));
+        assert!(matches!(
+            parse_statement_complete("const value = 1")?,
+            ast::Statement::Declaration(ast::DeclStmt::Const(_))
+        ));
+        assert!(matches!(
+            parse_statement_complete("type Value int")?,
+            ast::Statement::Declaration(ast::DeclStmt::Type(_))
+        ));
+
+        for source in [
+            "go worker",
+            "go (worker())",
+            "defer worker",
+            "defer (worker())",
+            "fallthrough Label",
+            "counter++++",
+        ] {
+            assert!(
+                parse_statement_complete(source).is_err(),
+                "expected rejection of {source:?}"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn reject_goto_without_label() {
+        assert!(parse_statement_complete("goto").is_err());
+    }
+
+    #[test]
     fn parse_assign_stmt() -> Result<()> {
         let assign = |s, (l_len, r_len)| {
             let mut parser = new_started_parser(s);
             match parser.parse_simple_stmt()? {
                 ast::Statement::Assign(assign) => {
-                    if parser.next()?.is_some() {
-                        return Err(anyhow::anyhow!("parser is not ended"));
-                    }
+                    finish(&mut parser)?;
                     if assign.left.len() != l_len {
                         return Err(anyhow::anyhow!("left side length error"));
                     }
@@ -2917,6 +3314,24 @@ mod test {
         assign("_ = &PeerInfo{time.Now(), '1'}", (1, 1))?;
         assign("one, two, three = '一', '二', '三'", (3, 3))?;
 
+        for (source, expected) in [
+            ("value = other", Operator::Assign),
+            ("value += other", Operator::AddAssign),
+            ("value -= other", Operator::SubAssign),
+            ("value *= other", Operator::MulAssign),
+            ("value /= other", Operator::QuoAssign),
+            ("value %= other", Operator::RemAssign),
+            ("value &= other", Operator::AndAssign),
+            ("value |= other", Operator::OrAssign),
+            ("value ^= other", Operator::XorAssign),
+            ("value <<= other", Operator::ShlAssign),
+            ("value >>= other", Operator::ShrAssign),
+            ("value &^= other", Operator::AndNotAssign),
+            ("value := other", Operator::Define),
+        ] {
+            assert_eq!(assign(source, (1, 1))?.op, expected, "{source}");
+        }
+
         assert!(assign("a b = f()", (2, 1)).is_err());
         assert!(assign("a = b() c()", (1, 2)).is_err());
         assert!(assign("a = b(), c()", (1, 2)).is_err());
@@ -2926,9 +3341,14 @@ mod test {
 
     #[test]
     fn parse_for_stmt() -> Result<()> {
-        let range_stmt = |s| match new_started_parser(s).parse_for_stmt()? {
-            ast::Statement::Range(rg) => Ok(rg),
-            _ => Err(anyhow::anyhow!("not a RANGE statement")),
+        let range_stmt = |s| {
+            let mut parser = new_started_parser(s);
+            let statement = parser.parse_for_stmt()?;
+            finish(&mut parser)?;
+            match statement {
+                ast::Statement::Range(rg) => Ok(rg),
+                _ => Err(anyhow::anyhow!("not a RANGE statement")),
+            }
         };
 
         range_stmt("for range ch {};")?;
@@ -2945,9 +3365,14 @@ mod test {
         assert!(rg.op.is_some());
         assert!(rg.body.list.is_empty());
 
-        let for_stmt = |s| match new_started_parser(s).parse_for_stmt()? {
-            ast::Statement::For(fs) => Ok(fs),
-            _ => Err(anyhow::anyhow!("not a FOR statement")),
+        let for_stmt = |s| {
+            let mut parser = new_started_parser(s);
+            let statement = parser.parse_for_stmt()?;
+            finish(&mut parser)?;
+            match statement {
+                ast::Statement::For(fs) => Ok(fs),
+                _ => Err(anyhow::anyhow!("not a FOR statement")),
+            }
         };
 
         let fs = for_stmt("for {};")?;
@@ -2980,7 +3405,12 @@ mod test {
 
     #[test]
     fn parse_select_stmt() -> Result<()> {
-        let select = |s| new_started_parser(s).parse_select_stmt();
+        let select = |s| {
+            let mut parser = new_started_parser(s);
+            let select = parser.parse_select_stmt()?;
+            finish(&mut parser)?;
+            Ok(select)
+        };
 
         let slt = select(
             "select {
@@ -3008,9 +3438,14 @@ mod test {
 
     #[test]
     fn parse_switch_stmt() -> Result<()> {
-        let switch = |s| match new_started_parser(s).parse_switch_stmt()? {
-            ast::Statement::Switch(swt) => Ok(swt),
-            _ => Err(anyhow::anyhow!("not a SWITCH statement")),
+        let switch = |s| {
+            let mut parser = new_started_parser(s);
+            let statement = parser.parse_switch_stmt()?;
+            finish(&mut parser)?;
+            match statement {
+                ast::Statement::Switch(swt) => Ok(swt),
+                _ => Err(anyhow::anyhow!("not a SWITCH statement")),
+            }
         };
 
         let swt = switch("switch x {}")?;
@@ -3104,9 +3539,14 @@ mod test {
         )
         .is_err());
 
-        let type_switch = |s| match new_started_parser(s).parse_switch_stmt()? {
-            ast::Statement::TypeSwitch(swt) => Ok(swt),
-            _ => Err(anyhow::anyhow!("not a TYPE_SWITCH statement")),
+        let type_switch = |s| {
+            let mut parser = new_started_parser(s);
+            let statement = parser.parse_switch_stmt()?;
+            finish(&mut parser)?;
+            match statement {
+                ast::Statement::TypeSwitch(swt) => Ok(swt),
+                _ => Err(anyhow::anyhow!("not a TYPE_SWITCH statement")),
+            }
         };
 
         let swt = type_switch("switch x;x.(type) {}")?;
@@ -3195,7 +3635,7 @@ mod test {
         let stmt = |s| {
             let mut parser = new_started_parser(s);
             let ifst = parser.parse_if_stmt()?;
-            assert!(parser.next()?.is_none());
+            finish(&mut parser)?;
             Ok(ifst)
         };
 

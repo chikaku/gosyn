@@ -601,9 +601,19 @@ fn is_escaped_char(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::Scanner;
+    use crate::token::Keyword;
     use crate::token::LitKind;
     use crate::token::Operator;
     use crate::token::Token;
+
+    fn scan_tokens(source: &str) -> Vec<(usize, Token)> {
+        let mut scanner = Scanner::from(source);
+        let mut tokens = vec![];
+        while let Some(token) = scanner.next_token().expect("source should scan") {
+            tokens.push(token);
+        }
+        tokens
+    }
 
     #[test]
     fn line_ended() {
@@ -639,18 +649,233 @@ mod tests {
     }
 
     #[test]
-    fn scan_text() {
-        let mut scan = Scanner::from("'一', '二', '三'");
-        assert!(scan.next_token().is_ok());
-        assert!(scan.next_token().is_ok());
-        assert!(scan.next_token().is_ok());
-        assert!(scan.next_token().is_ok());
-        assert!(scan.next_token().is_ok());
+    fn insert_semicolon_after_all_trigger_tokens() {
+        for source in [
+            "name",
+            "1",
+            "1.5",
+            "1i",
+            "'x'",
+            r#""x""#,
+            "break",
+            "continue",
+            "fallthrough",
+            "return",
+            "x++",
+            "x--",
+            "(x)",
+            "x[0]",
+            "struct{}",
+        ] {
+            let tokens = scan_tokens(&format!("{source}\n+"));
+            let semicolons = tokens
+                .iter()
+                .filter(|(_, token)| *token == Token::Operator(Operator::SemiColon))
+                .count();
+            assert_eq!(semicolons, 1, "{source:?}");
+        }
+    }
 
-        let mut scan = Scanner::from("n%9");
-        assert!(scan.next_token().is_ok());
-        assert!(scan.next_token().is_ok());
-        assert!(scan.next_token().is_ok());
+    #[test]
+    fn do_not_insert_semicolon_after_non_trigger_tokens() {
+        for source in [
+            "case",
+            "chan",
+            "const",
+            "default",
+            "defer",
+            "else",
+            "for",
+            "func",
+            "go",
+            "goto",
+            "if",
+            "import",
+            "interface",
+            "map",
+            "range",
+            "select",
+            "struct",
+            "switch",
+            "type",
+            "var",
+            "+",
+            "(",
+            "[",
+            "{",
+            ",",
+            ".",
+            ":",
+        ] {
+            let tokens = scan_tokens(&format!("{source}\n+"));
+            assert!(
+                tokens
+                    .iter()
+                    .all(|(_, token)| *token != Token::Operator(Operator::SemiColon)),
+                "{source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn do_not_insert_semicolon_after_package_keyword() {
+        let tokens = scan_tokens("package\n+");
+        assert!(tokens
+            .iter()
+            .all(|(_, token)| *token != Token::Operator(Operator::SemiColon)));
+    }
+
+    #[test]
+    fn scan_text() {
+        assert_eq!(
+            scan_tokens("'一', '二', '三'"),
+            vec![
+                (0, Token::Literal(LitKind::Char, "'一'".into())),
+                (3, Token::Operator(Operator::Comma)),
+                (5, Token::Literal(LitKind::Char, "'二'".into())),
+                (8, Token::Operator(Operator::Comma)),
+                (10, Token::Literal(LitKind::Char, "'三'".into())),
+                (13, Token::Operator(Operator::SemiColon)),
+            ]
+        );
+
+        assert_eq!(
+            scan_tokens("n%9"),
+            vec![
+                (0, Token::Literal(LitKind::Ident, "n".into())),
+                (1, Token::Operator(Operator::Rem)),
+                (2, Token::Literal(LitKind::Integer, "9".into())),
+                (3, Token::Operator(Operator::SemiColon)),
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_identifiers_and_keywords() {
+        assert_eq!(
+            scan_tokens("alpha β2 _x9"),
+            vec![
+                (0, Token::Literal(LitKind::Ident, "alpha".into())),
+                (6, Token::Literal(LitKind::Ident, "β2".into())),
+                (9, Token::Literal(LitKind::Ident, "_x9".into())),
+                (12, Token::Operator(Operator::SemiColon)),
+            ]
+        );
+
+        let keywords = [
+            ("break", Keyword::Break),
+            ("case", Keyword::Case),
+            ("chan", Keyword::Chan),
+            ("const", Keyword::Const),
+            ("continue", Keyword::Continue),
+            ("default", Keyword::Default),
+            ("defer", Keyword::Defer),
+            ("else", Keyword::Else),
+            ("fallthrough", Keyword::FallThrough),
+            ("for", Keyword::For),
+            ("func", Keyword::Func),
+            ("go", Keyword::Go),
+            ("goto", Keyword::Goto),
+            ("if", Keyword::If),
+            ("import", Keyword::Import),
+            ("interface", Keyword::Interface),
+            ("map", Keyword::Map),
+            ("package", Keyword::Package),
+            ("range", Keyword::Range),
+            ("return", Keyword::Return),
+            ("select", Keyword::Select),
+            ("struct", Keyword::Struct),
+            ("switch", Keyword::Switch),
+            ("type", Keyword::Type),
+            ("var", Keyword::Var),
+        ];
+
+        for (source, keyword) in keywords {
+            let tokens = scan_tokens(source);
+            assert_eq!(
+                tokens.first(),
+                Some(&(0, Token::Keyword(keyword))),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn scan_all_operators_and_punctuation() {
+        let operators = [
+            ("+", Operator::Add),
+            ("-", Operator::Sub),
+            ("*", Operator::Star),
+            ("/", Operator::Quo),
+            ("%", Operator::Rem),
+            ("&", Operator::And),
+            ("|", Operator::Or),
+            ("^", Operator::Xor),
+            ("<<", Operator::Shl),
+            (">>", Operator::Shr),
+            ("&^", Operator::AndNot),
+            ("+=", Operator::AddAssign),
+            ("-=", Operator::SubAssign),
+            ("*=", Operator::MulAssign),
+            ("/=", Operator::QuoAssign),
+            ("%=", Operator::RemAssign),
+            ("&=", Operator::AndAssign),
+            ("|=", Operator::OrAssign),
+            ("^=", Operator::XorAssign),
+            ("<<=", Operator::ShlAssign),
+            (">>=", Operator::ShrAssign),
+            ("&^=", Operator::AndNotAssign),
+            ("&&", Operator::AndAnd),
+            ("||", Operator::OrOr),
+            ("<-", Operator::Arrow),
+            ("++", Operator::Inc),
+            ("--", Operator::Dec),
+            ("==", Operator::Equal),
+            ("<", Operator::Less),
+            (">", Operator::Greater),
+            ("=", Operator::Assign),
+            ("!", Operator::Not),
+            ("~", Operator::Tiled),
+            ("!=", Operator::NotEqual),
+            ("<=", Operator::LessEqual),
+            (">=", Operator::GreaterEqual),
+            (":=", Operator::Define),
+            ("...", Operator::DotDotDot),
+            ("(", Operator::ParenLeft),
+            (")", Operator::ParenRight),
+            ("[", Operator::BarackLeft),
+            ("]", Operator::BarackRight),
+            ("{", Operator::BraceLeft),
+            ("}", Operator::BraceRight),
+            (",", Operator::Comma),
+            (":", Operator::Colon),
+            (".", Operator::Dot),
+            (";", Operator::SemiColon),
+        ];
+
+        for (source, operator) in operators {
+            let tokens = scan_tokens(source);
+            assert_eq!(
+                tokens.first(),
+                Some(&(0, Token::Operator(operator))),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn scan_whitespace_positions_and_invalid_characters() {
+        assert_eq!(
+            scan_tokens("a \t\r\n b"),
+            vec![
+                (0, Token::Literal(LitKind::Ident, "a".into())),
+                (1, Token::Operator(Operator::SemiColon)),
+                (6, Token::Literal(LitKind::Ident, "b".into())),
+                (7, Token::Operator(Operator::SemiColon)),
+            ]
+        );
+
+        assert!(Scanner::from("@").next_token().is_err());
     }
 
     #[test]
@@ -763,6 +988,59 @@ mod tests {
     }
 
     #[test]
+    fn reject_numeric_base_prefix_without_digits() {
+        let invalid = ["0b", "0B", "0o", "0O", "0x", "0X"];
+        let accepted: Vec<_> = invalid
+            .into_iter()
+            .filter(|source| Scanner::from(source).scan_lit_number().is_ok())
+            .collect();
+        assert!(
+            accepted.is_empty(),
+            "accepted invalid literals: {accepted:?}"
+        );
+    }
+
+    #[test]
+    fn reject_invalid_digits_for_numeric_base() {
+        let invalid = [
+            "0b2", "0B9", "0b102", "0o8", "0O9", "08", "09", "0_8", "0128", "0xG",
+        ];
+        let accepted: Vec<_> = invalid
+            .into_iter()
+            .filter(|source| Scanner::from(source).scan_lit_number().is_ok())
+            .collect();
+        assert!(
+            accepted.is_empty(),
+            "accepted invalid literals: {accepted:?}"
+        );
+    }
+
+    #[test]
+    fn scan_hex_literal_followed_by_identifier() {
+        assert_eq!(
+            scan_tokens("0x1G"),
+            vec![
+                (0, Token::Literal(LitKind::Integer, "0x1".into())),
+                (3, Token::Literal(LitKind::Ident, "G".into())),
+                (4, Token::Operator(Operator::SemiColon)),
+            ]
+        );
+    }
+
+    #[test]
+    fn reject_exponents_without_digits() {
+        let invalid = ["1e", "1E+", "1e-", "0x1p", "0X1P+", "0x1p-"];
+        let accepted: Vec<_> = invalid
+            .into_iter()
+            .filter(|source| Scanner::from(source).scan_lit_number().is_ok())
+            .collect();
+        assert!(
+            accepted.is_empty(),
+            "accepted invalid literals: {accepted:?}"
+        );
+    }
+
+    #[test]
     fn scan_lit_rune() {
         let rune = |s| Scanner::from(s).scan_lit_rune();
         assert!(rune(r#"''"#).is_err());
@@ -782,8 +1060,21 @@ mod tests {
         assert!(rune(r#"'aa'"#).is_err());
         assert!(rune(r#"'\xa'"#).is_err());
         assert!(rune(r#"'\0'"#).is_err());
+        assert!(rune(r#"'\k'"#).is_err());
         assert!(rune(r#"'\uDFFF'"#).is_err());
         assert!(rune(r#"'\U00110000'"#).is_err());
+        assert!(rune("'\n'").is_err());
+        assert!(rune("'a").is_err());
+    }
+
+    #[test]
+    fn reject_out_of_range_octal_escape_in_rune() {
+        assert!(Scanner::from(r#"'\400'"#).scan_lit_rune().is_err());
+    }
+
+    #[test]
+    fn reject_double_quote_escape_in_rune() {
+        assert!(Scanner::from(r#"'\"'"#).scan_lit_rune().is_err());
     }
 
     #[test]
@@ -803,6 +1094,20 @@ mod tests {
 
         assert!(lit_str(r#""\uD800""#).is_err());
         assert!(lit_str(r#""\U00110000""#).is_err());
+        assert!(lit_str(r#""\k""#).is_err());
+        assert!(lit_str("\"line\nbreak\"").is_err());
+        assert!(lit_str("\"abc").is_err());
+        assert!(lit_str("`abc").is_err());
+    }
+
+    #[test]
+    fn reject_out_of_range_octal_escape_in_string() {
+        assert!(Scanner::from(r#""\400""#).scan_lit_string().is_err());
+    }
+
+    #[test]
+    fn reject_single_quote_escape_in_interpreted_string() {
+        assert!(Scanner::from(r#""\'""#).scan_lit_string().is_err());
     }
 
     #[test]
