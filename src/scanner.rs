@@ -3,6 +3,7 @@ use crate::token::LitKind;
 use crate::token::Operator;
 use crate::token::Token;
 use crate::Error;
+use crate::LexicalToken;
 
 use std::fs;
 use std::path::Path;
@@ -195,6 +196,17 @@ impl Scanner {
         self.pos += char_count;
         self.semicolon = self.try_insert_semicolon(&tok);
         Ok(Some((current, tok)))
+    }
+
+    pub(crate) fn tokenize(mut self) -> Result<Vec<LexicalToken>> {
+        let mut tokens = Vec::new();
+        while let Some((start, token)) = self.next_token()? {
+            let end = self.position();
+            if start < end {
+                tokens.push(LexicalToken { start, end, token });
+            }
+        }
+        Ok(tokens)
     }
 
     fn add_token_cross_line(&mut self, tok: &Token) {

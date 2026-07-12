@@ -10,6 +10,26 @@ pub mod token;
 
 pub use error::Error;
 pub use parser::Parser;
+use token::Token;
+
+/// A lexical token and its range in the source text.
+///
+/// `start..end` is a half-open range whose offsets are measured in Unicode
+/// scalar values, the same coordinate system used by positions in [`ast`].
+/// Scanner-inserted semicolons are omitted because they have no source range.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LexicalToken {
+    pub start: usize,
+    pub end: usize,
+    pub token: Token,
+}
+
+/// Tokenize Go source and return each token with its source range.
+///
+/// Whitespace and scanner-inserted semicolons are not returned.
+pub fn tokenize_source<S: AsRef<str>>(source: S) -> anyhow::Result<Vec<LexicalToken>> {
+    scanner::Scanner::from(source).tokenize()
+}
 
 /// parse source code to `ast::File`
 pub fn parse_source<S: AsRef<str>>(source: S) -> anyhow::Result<ast::File> {
