@@ -200,22 +200,13 @@ impl Scanner {
 
     pub(crate) fn tokenize(mut self) -> Result<Vec<LexicalToken>> {
         let mut tokens = Vec::new();
-        while let Some(token) = self.next_source_token()? {
-            tokens.push(token);
+        while let Some((start, token)) = self.next_token()? {
+            let end = self.position();
+            if start < end {
+                tokens.push(LexicalToken { start, end, token });
+            }
         }
         Ok(tokens)
-    }
-
-    fn next_source_token(&mut self) -> Result<Option<LexicalToken>> {
-        self.skip_whitespace();
-        if self.pos >= self.chars.len() {
-            return Ok(None);
-        }
-
-        let start = self.pos;
-        let (token, char_count) = self.scan_token()?;
-        self.pos += char_count;
-        Ok(Some(LexicalToken { start, end: self.pos, token }))
     }
 
     fn add_token_cross_line(&mut self, tok: &Token) {
