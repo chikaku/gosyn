@@ -135,10 +135,11 @@ fn preserves_inline_and_rolled_back_field_comments() {
     let source = r#"package p
 type S struct {
     A int // inline line comment
-    // leading comment after rollback
     B int
-    C int; D int
-    E int /* inline block comment */
+    // leading comment after rollback
+    C int
+    D int; E int
+    F int /* inline block comment */
 }
 "#;
 
@@ -151,19 +152,20 @@ type S struct {
     };
 
     let fields = &struct_type.fields;
-    assert_eq!(fields.len(), 5);
+    assert_eq!(fields.len(), 6);
     assert_eq!(
         comment_texts(&fields[0].comments),
         ["// inline line comment"]
     );
+    assert!(fields[1].comments.is_empty());
     assert_eq!(
-        comment_texts(&fields[1].comments),
+        comment_texts(&fields[2].comments),
         ["// leading comment after rollback"]
     );
-    assert!(fields[2].comments.is_empty());
     assert!(fields[3].comments.is_empty());
+    assert!(fields[4].comments.is_empty());
     assert_eq!(
-        comment_texts(&fields[4].comments),
+        comment_texts(&fields[5].comments),
         ["/* inline block comment */"]
     );
 }
@@ -171,22 +173,37 @@ type S struct {
 #[test]
 fn comments_crossing_parser_backtracking_do_not_leak() {
     let cases = [
-        "package p\ntype Array [N /* length */]int\n\nfunc after() {}\n",
-        "package p\ntype Generic[T /* parameter */ any] []T\n\nfunc after() {}\n",
-        "package p\ntype Constraint interface { T /* union */ | U }\n\nfunc after() {}\n",
+        (
+            "package p\ntype Array [N /* length */]int\n\nfunc after() {}\n",
+            "/* length */",
+        ),
+        (
+            "package p\ntype Generic[T /* parameter */ any] []T\n\nfunc after() {}\n",
+            "/* parameter */",
+        ),
+        (
+            "package p\ntype Constraint interface { T /* union */ | U }\n\nfunc after() {}\n",
+            "/* union */",
+        ),
     ];
 
-    for source in cases {
+    for (source, expected_comment) in cases {
         let file = parse_source(source).unwrap();
-        let Declaration::Function(after) = &file.decl[1] else {
+        let [Declaration::Type(types), Declaration::Function(after)] = file.decl.as_slice() else {
             panic!(
-                "expected the second declaration to be a function: {:#?}",
+                "unexpected declarations after backtracking: {:#?}",
                 file.decl
             );
         };
-        assert!(
-            after.docs.is_empty(),
-            "internal comment leaked into function docs"
+
+        assert!(types.docs.is_empty());
+        assert!(types.specs[0].docs.is_empty());
+        assert!(after.docs.is_empty());
+
+        // Speculative parsing observes the internal comment on both passes.
+        assert_eq!(
+            comment_texts(&file.comments),
+            [expected_comment, expected_comment]
         );
     }
 }
