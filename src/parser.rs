@@ -16,6 +16,7 @@ pub struct Parser {
     expr_level: i32,
     comments: Vec<Rc<ast::Comment>>, // all comments
     lead_comments: Vec<Rc<ast::Comment>>,
+    lead_comment_end_line: Option<usize>,
     current: Option<(usize, Token)>,
     prev_pos: (usize, bool), // save previous token position for rollback
     is_started: bool,
@@ -168,7 +169,7 @@ impl Parser {
         let mut pos_tok = self.scan_next()?;
         while let Some((pos, Token::Comment(text))) = pos_tok {
             if self.scan.line_info(pos).0 > line + 1 {
-                self.lead_comments.clear();
+                self.clear_lead_comments();
             }
 
             let ended = self.scan.position();
@@ -176,18 +177,14 @@ impl Parser {
             let comment = Rc::new(ast::Comment { pos, text });
             self.comments.push(comment.clone());
             self.lead_comments.push(comment.clone());
+            self.lead_comment_end_line = Some(line);
             pos_tok = self.scan_next()?;
         }
 
-        if let Some(comment) = self.lead_comments.last() {
-            // TODO: avoid .chars().count()
-            let comment_end_pos = comment.pos + comment.text.chars().count();
-            let comment_end_line = self.scan.line_info(comment_end_pos).0;
-            if let Some((pos, _)) = &pos_tok {
-                let token_start_line = self.scan.line_info(*pos).0;
-                if token_start_line > comment_end_line + 1 {
-                    self.lead_comments.clear();
-                }
+        if let (Some(comment_end_line), Some((pos, _))) = (self.lead_comment_end_line, &pos_tok) {
+            let token_start_line = self.scan.line_info(*pos).0;
+            if token_start_line > comment_end_line + 1 {
+                self.clear_lead_comments();
             }
         }
 
@@ -195,7 +192,13 @@ impl Parser {
         Ok(self.current.as_ref())
     }
 
+    fn clear_lead_comments(&mut self) {
+        self.lead_comments.clear();
+        self.lead_comment_end_line = None;
+    }
+
     fn drain_comments(&mut self) -> Vec<Rc<ast::Comment>> {
+        self.lead_comment_end_line = None;
         self.lead_comments.drain(0..).collect()
     }
 
@@ -211,7 +214,7 @@ impl Parser {
         Ok(match self.scan_next()? {
             None => None,
             Some((pos, Token::Comment(text))) => {
-                self.lead_comments.clear();
+                self.clear_lead_comments();
                 let (line1, _) = self.scan.line_info(pos);
                 if line0 == line1 {
                     self.next()?;
@@ -223,7 +226,7 @@ impl Parser {
                 }
             }
             _ => {
-                self.lead_comments.clear();
+                self.clear_lead_comments();
                 self.goback(start);
                 self.next()?;
                 None
