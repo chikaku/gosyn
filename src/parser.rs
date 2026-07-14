@@ -828,8 +828,11 @@ impl Parser {
             }
 
             Some((_, Token::Operator(Operator::Star))) => {
-                self.next()?;
-                let typ = self.qualified_ident(None)?;
+                let pos = self.expect(Operator::Star)?;
+                let embedded_type = self.qualified_ident(None)?;
+                let embedded_type = Box::new(embedded_type);
+                let pointer_type = ast::PointerType { pos, typ: embedded_type };
+                let typ = ast::Expression::TypePointer(pointer_type);
                 let tag = self.string_literal_or_none()?;
                 let comments = self.drain_comments();
                 Ok(ast::Field { name: vec![], typ, tag, comments })
@@ -2392,6 +2395,16 @@ mod test {
         }
     }
 
+    fn assert_pointer_type(expression: &Expression, expected_pos: usize) -> &Expression {
+        match expression {
+            Expression::TypePointer(pointer) => {
+                assert_eq!(pointer.pos, expected_pos);
+                &pointer.typ
+            }
+            other => panic!("expected pointer type at {expected_pos}, got {other:?}"),
+        }
+    }
+
     fn assert_binary(expression: &Expression, expected: Operator) -> (&Expression, &Expression) {
         match expression {
             Expression::Operation(operation) => {
@@ -3169,6 +3182,44 @@ mod test {
         assert!(struct_("struct {a, b}").is_err());
         assert!(struct_("struct {a ...int}").is_err());
         assert!(struct_("struct {a, b int, bool}").is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_embedded_pointer_field_ast_shapes() -> Result<()> {
+        let mut parser = new_started_parser("struct { T; *U; *pkg.V; *Box[int] }");
+        let struct_type = parser.struct_type()?;
+        finish(&mut parser)?;
+
+        let [plain, pointer, qualified_pointer, generic_pointer] = struct_type.fields.as_slice()
+        else {
+            return Err(anyhow::anyhow!("expected four struct fields"));
+        };
+
+        assert!(struct_type.fields.iter().all(|field| field.name.is_empty()));
+        assert_ident(&plain.typ, "T");
+
+        let pointer_type = assert_pointer_type(&pointer.typ, 12);
+        assert_ident(pointer_type, "U");
+
+        let qualified_type = assert_pointer_type(&qualified_pointer.typ, 16);
+        match qualified_type {
+            Expression::Selector(selector) => {
+                assert_ident(&selector.x, "pkg");
+                assert_eq!(selector.sel.name, "V");
+            }
+            other => return Err(anyhow::anyhow!("expected qualified type, got {other:?}")),
+        }
+
+        let generic_type = assert_pointer_type(&generic_pointer.typ, 24);
+        match generic_type {
+            Expression::Index(index) => {
+                assert_ident(&index.left, "Box");
+                assert_ident(&index.index, "int");
+            }
+            other => return Err(anyhow::anyhow!("expected generic type, got {other:?}")),
+        }
 
         Ok(())
     }
