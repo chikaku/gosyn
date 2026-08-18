@@ -1,3 +1,5 @@
+
+
 # gosyn
 
 Golang's syntax parser in Rust follow by the [Specification](https://go.dev/ref/spec).
@@ -5,3 +7,7 @@ Golang's syntax parser in Rust follow by the [Specification](https://go.dev/ref/
 ## documentation
 
 See https://docs.rs/gosyn
+
+## license
+
+MIT
