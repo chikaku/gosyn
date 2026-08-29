@@ -600,15 +600,23 @@ fn is_newline(c: char) -> bool {
 }
 
 fn is_unicode_letter(c: char) -> bool {
+    if c.is_ascii() {
+        return c.is_ascii_alphabetic();
+    }
+
     GeneralCategory::of(c).is_letter()
 }
 
 fn is_unicode_digit(c: char) -> bool {
+    if c.is_ascii() {
+        return c.is_ascii_digit();
+    }
+
     matches!(GeneralCategory::of(c), GeneralCategory::DecimalNumber)
 }
 
 fn is_letter(c: char) -> bool {
-    is_unicode_letter(c) || c == '_'
+    c == '_' || is_unicode_letter(c)
 }
 
 fn is_binary_digit(c: char) -> bool {
