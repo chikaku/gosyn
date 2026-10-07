@@ -111,6 +111,19 @@ pub struct InterfaceType {
     pub methods: FieldList,
 }
 
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SingleType {
+    TypeMap(MapType),             // map[K]V
+    TypeArray(ArrayType),         // [N]T
+    TypeSlice(SliceType),         // []T
+    TypeFunction(FuncType),       // func (...) ...
+    TypeStruct(StructType),       // struct { ... }
+    TypeChannel(ChannelType),     // <-chan T | chan<- T | chan T
+    TypePointer(PointerType),     // *T
+    TypeInterface(InterfaceType), // interface { ... }
+}
+
 // ================ Expression Definition ================
 
 #[derive(Debug, Clone)]
@@ -268,14 +281,7 @@ pub enum Expression {
     CompositeLit(CompositeLit),
     List(Vec<Expression>),
     Operation(Operation),
-    TypeMap(MapType),             // map[K]V
-    TypeArray(ArrayType),         // [N]T
-    TypeSlice(SliceType),         // []T
-    TypeFunction(FuncType),       // func (...) ...
-    TypeStruct(StructType),       // struct { ... }
-    TypeChannel(ChannelType),     // <-chan T | chan<- T | chan T
-    TypePointer(PointerType),     // *T
-    TypeInterface(InterfaceType), // interface { ... }
+    Type(SingleType),
 }
 
 // ================ Declaration Definition ================
@@ -641,14 +647,22 @@ impl Expression {
             Expression::IndexList(x) => x.left.pos(),
             Expression::List(_) => unimplemented!("list may empty"),
             Expression::Operation(x) => x.x.pos(),
-            Expression::TypeMap(x) => x.pos.0,
-            Expression::TypeArray(x) => x.pos.0,
-            Expression::TypeSlice(x) => x.pos.0,
-            Expression::TypeFunction(f) => f.pos,
-            Expression::TypeStruct(x) => x.pos.0,
-            Expression::TypeChannel(x) => x.pos.0,
-            Expression::TypePointer(x) => x.pos,
-            Expression::TypeInterface(x) => x.pos,
+            Expression::Type(typ) => typ.pos(),
+        }
+    }
+}
+
+impl SingleType {
+    pub fn pos(&self) -> usize {
+        match self {
+            SingleType::TypeMap(x) => x.pos.0,
+            SingleType::TypeArray(x) => x.pos.0,
+            SingleType::TypeSlice(x) => x.pos.0,
+            SingleType::TypeFunction(f) => f.pos,
+            SingleType::TypeStruct(x) => x.pos.0,
+            SingleType::TypeChannel(x) => x.pos.0,
+            SingleType::TypePointer(x) => x.pos,
+            SingleType::TypeInterface(x) => x.pos,
         }
     }
 }
@@ -697,14 +711,7 @@ impl Debug for Expression {
             Self::CompositeLit(arg0) => f.debug_tuple("CompositeLit").field(arg0).finish(),
             Self::List(arg0) => f.debug_tuple("List").field(arg0).finish(),
             Self::Operation(arg0) => f.debug_tuple("Operation").field(arg0).finish(),
-            Self::TypeMap(arg0) => f.debug_tuple("TypeMap").field(arg0).finish(),
-            Self::TypeArray(arg0) => f.debug_tuple("TypeArray").field(arg0).finish(),
-            Self::TypeSlice(arg0) => f.debug_tuple("TypeSlice").field(arg0).finish(),
-            Self::TypeFunction(arg0) => f.debug_tuple("TypeFunction").field(arg0).finish(),
-            Self::TypeStruct(arg0) => f.debug_tuple("TypeStruct").field(arg0).finish(),
-            Self::TypeChannel(arg0) => f.debug_tuple("TypeChannel").field(arg0).finish(),
-            Self::TypePointer(arg0) => f.debug_tuple("TypePointer").field(arg0).finish(),
-            Self::TypeInterface(arg0) => f.debug_tuple("TypeInterface").field(arg0).finish(),
+            Self::Type(arg0) => f.debug_tuple("Type").field(arg0).finish(),
         }
     }
 }

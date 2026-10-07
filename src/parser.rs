@@ -503,7 +503,7 @@ impl Parser {
                 let pos1 = self.expect(Operator::BarackRight)?;
                 let typ = Box::new(self.type_()?);
                 let arr = ast::ArrayType { pos: (pos0, pos1), len, typ };
-                let typ = ast::Expression::TypeArray(arr);
+                let typ = ast::Expression::Type(ast::SingleType::TypeArray(arr));
                 let alias = false;
                 let params = ast::FieldList::default();
                 Ok(ast::TypeSpec { docs, alias, name, typ, params })
@@ -516,7 +516,7 @@ impl Parser {
                 };
                 let alias = false;
                 let params = ast::FieldList::default();
-                let typ = ast::Expression::TypeSlice(slice);
+                let typ = ast::Expression::Type(ast::SingleType::TypeSlice(slice));
                 Ok(ast::TypeSpec { docs, alias, name, typ, params })
             }
             _ => {
@@ -525,7 +525,7 @@ impl Parser {
                 let pos1 = self.expect(Operator::BarackRight)?;
                 let typ = Box::new(self.type_()?);
                 let arr = ast::ArrayType { pos: (pos0, pos1), len, typ };
-                let typ = ast::Expression::TypeArray(arr);
+                let typ = ast::Expression::Type(ast::SingleType::TypeArray(arr));
                 let alias = false;
                 let params = ast::FieldList::default();
                 Ok(ast::TypeSpec { docs, alias, name, typ, params })
@@ -650,7 +650,9 @@ impl Parser {
                 let pos = self.expect(Operator::Star)?;
                 let typ = Box::new(self.type_()?);
                 let ptr = ast::PointerType { pos, typ };
-                Ok(Some(ast::Expression::TypePointer(ptr)))
+                Ok(Some(ast::Expression::Type(ast::SingleType::TypePointer(
+                    ptr,
+                ))))
             }
 
             Some((_, Token::Operator(Operator::Arrow))) => {
@@ -660,12 +662,16 @@ impl Parser {
                 let pos = (pos, pos1);
                 let dir = Some(ChanMode::Recv);
                 let chan = ast::ChannelType { pos, dir, typ };
-                Ok(Some(ast::Expression::TypeChannel(chan)))
+                Ok(Some(ast::Expression::Type(ast::SingleType::TypeChannel(
+                    chan,
+                ))))
             }
 
             Some((_, Token::Keyword(Keyword::Func))) => {
                 let typ = self.func_type()?;
-                Ok(Some(ast::Expression::TypeFunction(typ)))
+                Ok(Some(ast::Expression::Type(ast::SingleType::TypeFunction(
+                    typ,
+                ))))
             }
 
             Some((_, Token::Operator(Operator::BarackLeft))) => {
@@ -674,7 +680,9 @@ impl Parser {
                     let pos = (pos, self.expect(Operator::BarackRight)?);
                     let typ = Box::new(self.type_()?);
                     let slice = ast::SliceType { pos, typ };
-                    return Ok(Some(ast::Expression::TypeSlice(slice)));
+                    return Ok(Some(ast::Expression::Type(ast::SingleType::TypeSlice(
+                        slice,
+                    ))));
                 }
 
                 let len = Box::new(self.array_len()?);
@@ -682,7 +690,7 @@ impl Parser {
                 let typ = Box::new(self.type_()?);
                 let pos = (pos, pos1);
                 let arr = ast::ArrayType { len, typ, pos };
-                Ok(Some(ast::Expression::TypeArray(arr)))
+                Ok(Some(ast::Expression::Type(ast::SingleType::TypeArray(arr))))
             }
 
             Some((_, Token::Keyword(Keyword::Chan))) => {
@@ -692,7 +700,9 @@ impl Parser {
                 let typ = Box::new(self.type_()?);
                 let pos = (pos, pos1);
                 let chan = ast::ChannelType { pos, dir, typ };
-                Ok(Some(ast::Expression::TypeChannel(chan)))
+                Ok(Some(ast::Expression::Type(ast::SingleType::TypeChannel(
+                    chan,
+                ))))
             }
 
             Some((_, Token::Keyword(Keyword::Map))) => {
@@ -703,17 +713,21 @@ impl Parser {
                 let val = Box::new(self.type_()?);
                 let pos = (pos0, pos1);
                 let map = ast::MapType { pos, key, val };
-                Ok(Some(ast::Expression::TypeMap(map)))
+                Ok(Some(ast::Expression::Type(ast::SingleType::TypeMap(map))))
             }
 
             Some((_, Token::Keyword(Keyword::Struct))) => {
                 let typ = self.struct_type()?;
-                Ok(Some(ast::Expression::TypeStruct(typ)))
+                Ok(Some(ast::Expression::Type(ast::SingleType::TypeStruct(
+                    typ,
+                ))))
             }
 
             Some((_, Token::Keyword(Keyword::Interface))) => {
                 let typ = self.parse_interface_type()?;
-                Ok(Some(ast::Expression::TypeInterface(typ)))
+                Ok(Some(ast::Expression::Type(ast::SingleType::TypeInterface(
+                    typ,
+                ))))
             }
 
             Some((_, Token::Literal(LitKind::Ident, _))) => {
@@ -844,7 +858,7 @@ impl Parser {
                 let embedded_type = self.qualified_ident(None)?;
                 let embedded_type = Box::new(embedded_type);
                 let pointer_type = ast::PointerType { pos, typ: embedded_type };
-                let typ = ast::Expression::TypePointer(pointer_type);
+                let typ = ast::Expression::Type(ast::SingleType::TypePointer(pointer_type));
                 let tag = self.string_literal_or_none()?;
                 let comments = self.drain_comments();
                 Ok(ast::Field { name: vec![], typ, tag, comments })
@@ -909,7 +923,7 @@ impl Parser {
         Ok(ast::Field {
             tag: None,
             name: vec![id],
-            typ: ast::Expression::TypeFunction(func),
+            typ: ast::Expression::Type(ast::SingleType::TypeFunction(func)),
             comments: Default::default(),
         })
     }
@@ -1046,9 +1060,11 @@ impl Parser {
                 self.next()?;
                 match self.unray_expression()? {
                     // convert `<- ChanType` to `<-chan Type`
-                    ast::Expression::TypeChannel(typ) => {
+                    ast::Expression::Type(ast::SingleType::TypeChannel(typ)) => {
                         let chan_type = self.reset_chan_arrow(pos, typ)?;
-                        Ok(ast::Expression::TypeChannel(chan_type))
+                        Ok(ast::Expression::Type(ast::SingleType::TypeChannel(
+                            chan_type,
+                        )))
                     }
                     // receive message
                     x => {
@@ -1237,7 +1253,7 @@ impl Parser {
                     return Ok(ast::Expression::FuncLit(lit));
                 }
 
-                Ok(ast::Expression::TypeFunction(typ))
+                Ok(ast::Expression::Type(ast::SingleType::TypeFunction(typ)))
             }
 
             Some((
@@ -1270,9 +1286,11 @@ impl Parser {
                 // <- chan<- T
                 match *typ.typ {
                     // <-chan <-chan T
-                    ast::Expression::TypeChannel(chan_type) => {
+                    ast::Expression::Type(ast::SingleType::TypeChannel(chan_type)) => {
                         let chan_type = self.reset_chan_arrow(typ.pos.1, chan_type)?;
-                        typ.typ = Box::new(ast::Expression::TypeChannel(chan_type));
+                        typ.typ = Box::new(ast::Expression::Type(ast::SingleType::TypeChannel(
+                            chan_type,
+                        )));
                         typ.dir = Some(ast::ChanMode::Recv);
                         typ.pos = (typ.pos.0, pos);
                         Ok(typ)
@@ -1287,10 +1305,10 @@ impl Parser {
     /// check if brace is belong to current expression
     fn check_brace(&self, expr: &ast::Expression) -> bool {
         match expr {
-            ast::Expression::TypeStruct(..)
-            | ast::Expression::TypeMap(..)
-            | ast::Expression::TypeArray(..)
-            | ast::Expression::TypeSlice(..) => true,
+            ast::Expression::Type(ast::SingleType::TypeStruct(..))
+            | ast::Expression::Type(ast::SingleType::TypeMap(..))
+            | ast::Expression::Type(ast::SingleType::TypeArray(..))
+            | ast::Expression::Type(ast::SingleType::TypeSlice(..)) => true,
             ast::Expression::Ident(..)
             | ast::Expression::IndexList(..) // map[k, v]{}
             | ast::Expression::Selector(..)
@@ -1587,7 +1605,7 @@ impl Parser {
             let pos = (pos0, self.expect(Operator::BarackRight)?);
             let typ = Box::new(self.type_()?);
             let slice = ast::SliceType { pos, typ };
-            return Ok(ast::Expression::TypeSlice(slice));
+            return Ok(ast::Expression::Type(ast::SingleType::TypeSlice(slice)));
         }
 
         let (expr, comma) = self.type_list(false)?;
@@ -1601,7 +1619,7 @@ impl Parser {
                     typ: Box::new(typ),
                 };
 
-                return Ok(ast::Expression::TypeArray(array));
+                return Ok(ast::Expression::Type(ast::SingleType::TypeArray(array)));
             }
         }
 
@@ -2347,13 +2365,13 @@ fn unparen(expr: ast::Expression) -> ast::Expression {
 
 fn is_type_elem(expr: &ast::Expression) -> bool {
     match expr {
-        ast::Expression::TypeArray(..)
-        | ast::Expression::TypeStruct(..)
-        | ast::Expression::TypeFunction(..)
-        | ast::Expression::TypeInterface(..)
-        | ast::Expression::TypeSlice(..)
-        | ast::Expression::TypeMap(..)
-        | ast::Expression::TypeChannel(..) => true,
+        ast::Expression::Type(ast::SingleType::TypeArray(..))
+        | ast::Expression::Type(ast::SingleType::TypeStruct(..))
+        | ast::Expression::Type(ast::SingleType::TypeFunction(..))
+        | ast::Expression::Type(ast::SingleType::TypeInterface(..))
+        | ast::Expression::Type(ast::SingleType::TypeSlice(..))
+        | ast::Expression::Type(ast::SingleType::TypeMap(..))
+        | ast::Expression::Type(ast::SingleType::TypeChannel(..)) => true,
         ast::Expression::Paren(p) => is_type_elem(&p.expr),
         ast::Expression::Operation(opt) => match opt {
             ast::Operation { op: Operator::Tiled, .. } => true,
@@ -2366,7 +2384,7 @@ fn is_type_elem(expr: &ast::Expression) -> bool {
 
 #[cfg(test)]
 mod test {
-    use crate::ast::{self, Declaration, Expression};
+    use crate::ast::{self, Declaration, Expression, SingleType};
     use crate::parser::Parser;
     use crate::token::{Keyword, Operator};
 
@@ -2409,7 +2427,7 @@ mod test {
 
     fn assert_pointer_type(expression: &Expression, expected_pos: usize) -> &Expression {
         match expression {
-            Expression::TypePointer(pointer) => {
+            Expression::Type(SingleType::TypePointer(pointer)) => {
                 assert_eq!(pointer.pos, expected_pos);
                 &pointer.typ
             }
@@ -2649,17 +2667,17 @@ mod test {
         };
 
         match typ("type n [2]int")?.typ {
-            ast::Expression::TypeArray(_) => {}
+            ast::Expression::Type(ast::SingleType::TypeArray(_)) => {}
             _ => return Err(anyhow::anyhow!("not type ARRAY")),
         };
 
         match typ("type a [sz(k{})]T")?.typ {
-            ast::Expression::TypeArray(_) => {}
+            ast::Expression::Type(ast::SingleType::TypeArray(_)) => {}
             _ => return Err(anyhow::anyhow!("not type ARRAY")),
         };
 
         let type_struct = |s| match typ(s)?.typ {
-            ast::Expression::TypeStruct(s) => Ok(s),
+            ast::Expression::Type(ast::SingleType::TypeStruct(s)) => Ok(s),
             _ => Err(anyhow::anyhow!("not type STRUCT")),
         };
 
@@ -2720,7 +2738,7 @@ mod test {
             }
         }
         match &set.typ {
-            Expression::TypeMap(map) => {
+            Expression::Type(SingleType::TypeMap(map)) => {
                 assert_ident(&map.key, "P");
                 assert_ident(&map.val, "bool");
             }
@@ -2988,7 +3006,10 @@ mod test {
 
         match parse_expression_complete("map[string]int{\"one\": 1}")? {
             Expression::CompositeLit(literal) => {
-                assert!(matches!(*literal.typ, Expression::TypeMap(_)));
+                assert!(matches!(
+                    *literal.typ,
+                    Expression::Type(SingleType::TypeMap(_))
+                ));
                 assert_eq!(literal.val.values.len(), 1);
             }
             other => return Err(anyhow::anyhow!("expected composite literal, got {other:?}")),
@@ -3158,7 +3179,10 @@ mod test {
 
         assert_eq!(method.name.len(), 1);
         assert_eq!(method.name[0].name, "Method");
-        assert!(matches!(method.typ, Expression::TypeFunction(_)));
+        assert!(matches!(
+            method.typ,
+            Expression::Type(SingleType::TypeFunction(_))
+        ));
 
         Ok(())
     }
@@ -3248,7 +3272,7 @@ mod test {
         assert_eq!(field.name.len(), 1);
         assert_eq!(field.name[0].name, "events");
         match &field.typ {
-            Expression::TypeChannel(channel) => {
+            Expression::Type(SingleType::TypeChannel(channel)) => {
                 assert_eq!(channel.dir, Some(ast::ChanMode::Recv));
                 assert_ident(&channel.typ, "Event");
             }
@@ -3861,7 +3885,7 @@ mod test {
                     assert_eq!(x.specs[0].docs.len(), 1);
 
                     match &x.specs[0].typ {
-                        Expression::TypeStruct(x) => {
+                        Expression::Type(SingleType::TypeStruct(x)) => {
                             assert_eq!(x.fields[0].comments.len(), 1);
                             assert_eq!(x.fields[1].comments.len(), 2);
                             assert_eq!(x.fields[2].comments.len(), 1);
