@@ -114,14 +114,14 @@ pub struct InterfaceType {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SingleType {
-    TypeMap(MapType),             // map[K]V
-    TypeArray(ArrayType),         // [N]T
-    TypeSlice(SliceType),         // []T
-    TypeFunction(FuncType),       // func (...) ...
-    TypeStruct(StructType),       // struct { ... }
-    TypeChannel(ChannelType),     // <-chan T | chan<- T | chan T
-    TypePointer(PointerType),     // *T
-    TypeInterface(InterfaceType), // interface { ... }
+    Map(MapType),             // map[K]V
+    Array(ArrayType),         // [N]T
+    Slice(SliceType),         // []T
+    Function(FuncType),       // func (...) ...
+    Struct(StructType),       // struct { ... }
+    Channel(ChannelType),     // <-chan T | chan<- T | chan T
+    Pointer(PointerType),     // *T
+    Interface(InterfaceType), // interface { ... }
 }
 
 #[derive(Debug, Clone)]
@@ -689,14 +689,14 @@ impl Type {
 impl SingleType {
     pub fn pos(&self) -> usize {
         match self {
-            SingleType::TypeMap(x) => x.pos.0,
-            SingleType::TypeArray(x) => x.pos.0,
-            SingleType::TypeSlice(x) => x.pos.0,
-            SingleType::TypeFunction(f) => f.pos,
-            SingleType::TypeStruct(x) => x.pos.0,
-            SingleType::TypeChannel(x) => x.pos.0,
-            SingleType::TypePointer(x) => x.pos,
-            SingleType::TypeInterface(x) => x.pos,
+            SingleType::Map(x) => x.pos.0,
+            SingleType::Array(x) => x.pos.0,
+            SingleType::Slice(x) => x.pos.0,
+            SingleType::Function(f) => f.pos,
+            SingleType::Struct(x) => x.pos.0,
+            SingleType::Channel(x) => x.pos.0,
+            SingleType::Pointer(x) => x.pos,
+            SingleType::Interface(x) => x.pos,
         }
     }
 }

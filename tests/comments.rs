@@ -116,7 +116,7 @@ var (
     assert!(bare.docs.is_empty());
     assert_eq!(comment_texts(&first.docs), ["/* first function */"]);
 
-    let Expression::Type(Type::Single(SingleType::TypeStruct(struct_type))) = &types.specs[0].typ
+    let Expression::Type(Type::Single(SingleType::Struct(struct_type))) = &types.specs[0].typ
     else {
         panic!("expected a struct type, got {:#?}", types.specs[0].typ);
     };
@@ -148,7 +148,7 @@ type S struct {
     let Declaration::Type(types) = &file.decl[0] else {
         panic!("expected a type declaration, got {:#?}", file.decl[0]);
     };
-    let Expression::Type(Type::Single(SingleType::TypeStruct(struct_type))) = &types.specs[0].typ
+    let Expression::Type(Type::Single(SingleType::Struct(struct_type))) = &types.specs[0].typ
     else {
         panic!("expected a struct type, got {:#?}", types.specs[0].typ);
     };
