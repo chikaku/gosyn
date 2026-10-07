@@ -124,6 +124,21 @@ pub enum SingleType {
     TypeInterface(InterfaceType), // interface { ... }
 }
 
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct UnionType {
+    pub pos: usize,
+    pub left: Box<Type>,
+    pub right: Box<Type>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Type {
+    Single(SingleType),
+    Union(UnionType),
+}
+
 // ================ Expression Definition ================
 
 #[derive(Debug, Clone)]
@@ -281,7 +296,7 @@ pub enum Expression {
     CompositeLit(CompositeLit),
     List(Vec<Expression>),
     Operation(Operation),
-    Type(SingleType),
+    Type(Type),
 }
 
 // ================ Declaration Definition ================
@@ -648,6 +663,15 @@ impl Expression {
             Expression::List(_) => unimplemented!("list may empty"),
             Expression::Operation(x) => x.x.pos(),
             Expression::Type(typ) => typ.pos(),
+        }
+    }
+}
+
+impl Type {
+    pub fn pos(&self) -> usize {
+        match self {
+            Self::Single(typ) => typ.pos(),
+            Self::Union(typ) => typ.pos,
         }
     }
 }
