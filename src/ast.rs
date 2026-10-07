@@ -113,7 +113,32 @@ pub struct InterfaceType {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct QualifiedName {
+    pub pos: usize,
+    pub package: Ident,
+    pub identifier: Ident,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum NameType {
+    Ident(Ident),
+    Qualified(QualifiedName),
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct InstantiatedType {
+    pub pos: (usize, usize),
+    pub name: NameType,
+    pub arguements: Vec<Type>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SingleType {
+    Name(NameType),
+    Instantiated(InstantiatedType),
     Map(MapType),             // map[K]V
     Array(ArrayType),         // [N]T
     Slice(SliceType),         // []T
@@ -697,6 +722,11 @@ impl SingleType {
             SingleType::Channel(x) => x.pos.0,
             SingleType::Pointer(x) => x.pos,
             SingleType::Interface(x) => x.pos,
+            SingleType::Name(name_type) => match name_type {
+                NameType::Ident(ident) => ident.pos,
+                NameType::Qualified(qualified_ident) => qualified_ident.pos,
+            },
+            SingleType::Instantiated(instantiated_type) => instantiated_type.pos.0,
         }
     }
 }
