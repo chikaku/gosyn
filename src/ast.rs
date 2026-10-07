@@ -126,6 +126,13 @@ pub enum SingleType {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct UnderLyingType {
+    pub pos: usize,
+    pub typ: Box<Type>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct UnionType {
     pub pos: usize,
     pub left: Box<Type>,
@@ -136,6 +143,8 @@ pub struct UnionType {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Type {
     Single(SingleType),
+    // FIXME: This should really be in a specific TypeTerm enum for interfaces
+    UnderLying(UnderLyingType),
     Union(UnionType),
 }
 
@@ -671,6 +680,7 @@ impl Type {
     pub fn pos(&self) -> usize {
         match self {
             Self::Single(typ) => typ.pos(),
+            Self::UnderLying(typ) => typ.pos,
             Self::Union(typ) => typ.pos,
         }
     }
