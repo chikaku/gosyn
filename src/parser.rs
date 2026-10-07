@@ -945,11 +945,25 @@ impl Parser {
             let pos = self.current_pos();
             self.next()?;
 
-            let x = Box::new(typ);
-            let y = Some(Box::new(self.parse_type_term()?));
-            let opt = ast::Operation { op, pos, x, y };
+            let left = typ;
+            let right = self.parse_type_term()?;
 
-            typ = ast::Expression::Operation(opt)
+            // FIXME: Remove this once we separate out types properly
+            typ = match (left, right) {
+                (ast::Expression::Type(left), ast::Expression::Type(right)) => {
+                    ast::Expression::Type(ast::Type::Union(ast::UnionType {
+                        pos,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    }))
+                }
+                (x, y) => ast::Expression::Operation(ast::Operation {
+                    op,
+                    pos,
+                    x: Box::new(x),
+                    y: Some(Box::new(y)),
+                }),
+            };
         }
 
         Ok(typ)
