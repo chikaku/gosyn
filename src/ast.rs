@@ -31,7 +31,7 @@ pub struct Ident {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PointerType {
     pub pos: usize,
-    pub typ: Box<Expression>,
+    pub typ: Box<Type>,
 }
 
 #[derive(Debug, Clone)]
@@ -39,22 +39,22 @@ pub struct PointerType {
 pub struct ArrayType {
     pub pos: (usize, usize),
     pub len: Box<Expression>,
-    pub typ: Box<Expression>,
+    pub typ: Box<Type>,
 }
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SliceType {
     pub pos: (usize, usize),
-    pub typ: Box<Expression>,
+    pub typ: Box<Type>,
 }
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MapType {
     pub pos: (usize, usize),
-    pub key: Box<Expression>,
-    pub val: Box<Expression>,
+    pub key: Box<Type>,
+    pub val: Box<Type>,
 }
 
 #[derive(Debug, Clone)]
@@ -85,7 +85,7 @@ pub struct StructType {
 pub struct ParameterSpec {
     pub identifiers: Vec<Ident>,
     pub variadic: Option<usize>, // If Some then represents the position of the ... operator
-    pub typ: Expression,
+    pub typ: Type,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -116,7 +116,7 @@ pub enum ChanMode {
 pub struct ChannelType {
     pub pos: (usize, usize), // chan, <-
     pub dir: Option<ChanMode>,
-    pub typ: Box<Expression>,
+    pub typ: Box<Type>,
 }
 
 #[derive(Debug, Clone)]
@@ -146,8 +146,6 @@ pub enum NameType {
 pub struct InstantiatedType {
     pub pos: (usize, usize),
     pub name: NameType,
-    // FIXME: Use `Type` here not `expression`
-    /// We use `Expression` for now due to limitations in the parser
     pub arguements: Vec<Type>,
 }
 
@@ -155,7 +153,7 @@ pub struct InstantiatedType {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ParenType {
     pub pos: (usize, usize),
-    pub typ: Box<Expression>,
+    pub typ: Box<Type>,
 }
 
 #[derive(Debug, Clone)]
@@ -178,15 +176,13 @@ pub enum Type {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct UnderLyingType {
     pub pos: usize,
-    // FIXME: Use Type here instead of Expression
-    pub typ: Box<Expression>,
+    pub typ: Box<Type>,
 }
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum TypeTerm {
-    // FIXME: Use Type here instead of Expression
-    Type(Expression),
+    Type(Type),
     UnderLyingType(UnderLyingType),
     // This will eventually just become the Type variant once we can ensure no expressions can be parsed here
     Single(Type),
@@ -263,7 +259,7 @@ pub struct Selector {
 pub struct TypeAssertion {
     pub pos: (usize, usize),
     pub left: Box<Expression>,
-    pub right: Option<Box<Expression>>, // None for x.(type)
+    pub right: Option<Box<Type>>, // None for x.(type)
 }
 
 #[derive(Debug, Clone)]
@@ -374,7 +370,7 @@ pub struct Decl<T> {
 pub struct VarSpec {
     pub docs: Vec<Rc<Comment>>,
     pub name: Vec<Ident>,
-    pub typ: Option<Expression>,
+    pub typ: Option<Type>,
     pub values: Vec<Expression>,
 }
 
@@ -383,7 +379,7 @@ pub struct VarSpec {
 pub struct ConstSpec {
     pub docs: Vec<Rc<Comment>>,
     pub name: Vec<Ident>,
-    pub typ: Option<Expression>,
+    pub typ: Option<Type>,
     pub values: Vec<Expression>,
 }
 
@@ -394,7 +390,7 @@ pub struct TypeSpec {
     pub alias: bool,
     pub name: Ident,
     pub params: FieldList,
-    pub typ: Expression,
+    pub typ: Type,
 }
 
 #[derive(Debug, Clone)]
@@ -649,36 +645,10 @@ pub struct Package {
 
 // ================ Type Implemention ================
 
-impl From<Ident> for Field {
-    fn from(id: Ident) -> Self {
-        Self {
-            name: vec![],
-            typ: TypeElem {
-                types: vec![TypeTerm::Single(Type::Name(NameType::Ident(id)))],
-            },
-            tag: None,
-            comments: Default::default(),
-        }
-    }
-}
-
 impl From<BasicLit> for StringLit {
     fn from(lit: BasicLit) -> StringLit {
         assert_eq!(lit.kind, LitKind::String);
         StringLit { pos: lit.pos, value: lit.value }
-    }
-}
-
-impl From<Expression> for Field {
-    fn from(expr: Expression) -> Self {
-        Self {
-            name: vec![],
-            typ: TypeElem {
-                types: vec![TypeTerm::Type(expr)],
-            },
-            tag: None,
-            comments: Default::default(),
-        }
     }
 }
 
