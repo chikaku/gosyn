@@ -724,7 +724,7 @@ impl Parser {
                 // `_` is a regular identifier syntactically; rejection of `_`
                 // in non-binding type positions is the type checker's job.
                 // Matches go/parser.
-                Ok(Some(self.qualified_ident(None)?))
+                Ok(Some(ast::Expression::Type(self.qualified_ident(None)?)))
             }
 
             (pos0, Token::Operator(Operator::ParenLeft)) => {
@@ -815,7 +815,7 @@ impl Parser {
                     )) => {
                         let typ = self.qualified_ident(Some(name))?;
                         let typ = ast::TypeElem {
-                            types: vec![ast::TypeTerm::Type(typ)],
+                            types: vec![ast::TypeTerm::Single(typ)],
                         };
                         let tag = self.string_literal_or_none()?;
                         let comments = self.drain_comments();
@@ -851,7 +851,7 @@ impl Parser {
             Some((_, Token::Operator(Operator::Star))) => {
                 let pos = self.expect(Operator::Star)?;
                 let embedded_type = self.qualified_ident(None)?;
-                let embedded_type = Box::new(embedded_type);
+                let embedded_type = Box::new(ast::Expression::Type(embedded_type));
                 let pointer_type = ast::PointerType { pos, typ: embedded_type };
                 let typ = ast::TypeElem {
                     types: vec![ast::TypeTerm::Single(ast::Type::Pointer(pointer_type))],
@@ -1556,7 +1556,7 @@ impl Parser {
                     let pkg = id_list.pop();
                     let typ = self.qualified_ident(pkg)?;
                     let mut list = id_list.into_iter().map(Into::into).collect::<Vec<_>>();
-                    list.push(typ.into());
+                    list.push(ast::Expression::Type(typ).into());
                     return Ok(list);
                 }
                 TokenKind::Operator(Operator::Comma) => {
@@ -1749,7 +1749,7 @@ impl Parser {
                     list.push(ast::ParameterSpec {
                         identifiers: vec![],
                         variadic: None,
-                        typ,
+                        typ: ast::Expression::Type(typ),
                     });
                     return Ok(list);
                 }
@@ -1836,30 +1836,34 @@ impl Parser {
         }))
     }
 
-    fn qualified_ident(&mut self, name: Option<ast::Ident>) -> Result<ast::Expression> {
+    // We return `ast::Type` here instead of `ast::NameType` as this also handles parsing instantiated types for qualified identifiers
+    fn qualified_ident(&mut self, name: Option<ast::Ident>) -> Result<ast::Type> {
         let name = match name {
             Some(name) => name,
             None => self.identifier()?,
         };
 
-        let mut x = ast::Expression::Ident(name);
-
         let pos = self.current_pos();
-        if self.skipped(Operator::Dot)? {
-            let x_ = Box::new(x);
+
+        let ident = if self.skipped(Operator::Dot)? {
             let sel = self.identifier()?;
-            let sec = ast::Selector { pos, x: x_, sel };
-            x = ast::Expression::Selector(sec);
-        }
+            ast::NameType::Qualified(ast::QualifiedName {
+                pos,
+                package: name,
+                identifier: sel,
+            })
+        } else {
+            ast::NameType::Ident(name)
+        };
 
         match self.current_is(Operator::BarackLeft) {
-            false => Ok(x),
+            false => Ok(ast::Type::Name(ident)),
             // pkg.T[a, b, c]
-            true => self.type_instance(x),
+            true => Ok(ast::Type::Instantiated(self.type_instance(ident)?)),
         }
     }
 
-    fn type_instance(&mut self, left: ast::Expression) -> Result<ast::Expression> {
+    fn type_instance(&mut self, name: ast::NameType) -> Result<ast::InstantiatedType> {
         let pos0 = self.expect(Operator::BarackLeft)?;
         if self.current_is(Operator::BarackRight) {
             return Err(self.else_error("expect type argument list"));
@@ -1868,11 +1872,11 @@ impl Parser {
         let (index, _) = self.type_list(true)?;
         let pos = (pos0, self.expect(Operator::BarackRight)?);
 
-        Ok(ast::Expression::Index(ast::Index {
+        Ok(ast::InstantiatedType {
             pos,
-            left: Box::new(left),
-            index: Box::new(index),
-        }))
+            name,
+            arguements: vec![index],
+        })
     }
 
     fn check_parameters(
@@ -2595,7 +2599,7 @@ fn is_type_elem(expr: &ast::Expression) -> bool {
 
 #[cfg(test)]
 mod test {
-    use crate::ast::{self, Declaration, Expression, Type, TypeTerm};
+    use crate::ast::{self, Declaration, Expression, NameType, Type, TypeTerm};
     use crate::parser::Parser;
     use crate::token::{Keyword, Operator};
 
@@ -2632,6 +2636,13 @@ mod test {
     fn assert_ident(expression: &Expression, expected: &str) {
         match expression {
             Expression::Ident(ident) => assert_eq!(ident.name, expected),
+            other => panic!("expected identifier {expected:?}, got {other:?}"),
+        }
+    }
+
+    fn assert_ident_type(typ: &Type, expected: &str) {
+        match typ {
+            Type::Name(NameType::Ident(ident)) => assert_eq!(ident.name, expected),
             other => panic!("expected identifier {expected:?}, got {other:?}"),
         }
     }
@@ -2918,7 +2929,9 @@ mod test {
         assert!(alias.alias);
         assert!(alias.params.list.is_empty());
         match &alias.typ {
-            Expression::Ident(ident) => assert_eq!(ident.name, "Original"),
+            Expression::Type(Type::Name(NameType::Ident(ident))) => {
+                assert_eq!(ident.name, "Original")
+            }
             other => return Err(anyhow::anyhow!("expected alias identifier, got {other:?}")),
         }
 
@@ -2931,7 +2944,9 @@ mod test {
         assert_eq!(set.params.list[0].name.len(), 1);
         assert_eq!(set.params.list[0].name[0].name, "P");
         match &set.params.list[0].typ.types[..] {
-            [TypeTerm::Type(Expression::Ident(ident))] => assert_eq!(ident.name, "comparable"),
+            [TypeTerm::Type(Expression::Type(Type::Name(NameType::Ident(ident))))] => {
+                assert_eq!(ident.name, "comparable")
+            }
             other => {
                 return Err(anyhow::anyhow!(
                     "expected comparable constraint, got {other:?}"
@@ -2940,8 +2955,14 @@ mod test {
         }
         match &set.typ {
             Expression::Type(Type::Map(map)) => {
-                assert_ident(&map.key, "P");
-                assert_ident(&map.val, "bool");
+                match &*map.key {
+                    Expression::Type(typ) => assert_ident_type(typ, "P"),
+                    _ => panic!("Got non type expression for map key"),
+                };
+                match &*map.val {
+                    Expression::Type(typ) => assert_ident_type(typ, "bool"),
+                    _ => panic!("Got non type expression for map val"),
+                };
             }
             other => return Err(anyhow::anyhow!("expected map alias, got {other:?}")),
         }
@@ -3366,7 +3387,10 @@ mod test {
         };
 
         for (term, expected) in [(left, "T"), (right, "U")] {
-            assert_ident(&term.typ, expected);
+            match &*term.typ {
+                Expression::Type(typ) => assert_ident_type(typ, expected),
+                _ => panic!("Got non type expression when expected type"),
+            };
         }
 
         assert_eq!(method.name.len(), 1);
@@ -3427,25 +3451,29 @@ mod test {
 
         assert!(struct_type.fields.iter().all(|field| field.name.is_empty()));
         let plain_type = match &plain.typ.types[0] {
-            TypeTerm::Type(typ) => typ,
+            TypeTerm::Single(typ) => typ,
             _ => panic!("Expected Expression"),
         };
-        assert_ident(plain_type, "T");
+        assert_ident_type(plain_type, "T");
 
         let pointer_type = match &pointer.typ.types[0] {
             TypeTerm::Single(Type::Pointer(typ)) => &typ.typ,
             _ => panic!("Got unexpected Underlying typ or expression"),
         };
-        assert_ident(pointer_type, "U");
+        let pointer_type = match &**pointer_type {
+            Expression::Type(typ) => typ,
+            _ => panic!("Got non type expression "),
+        };
+        assert_ident_type(pointer_type, "U");
 
         let qualified_type = match &qualified_pointer.typ.types[0] {
             TypeTerm::Single(Type::Pointer(typ)) => &typ.typ,
             _ => panic!("Got unexpected underlying type or Expression"),
         };
         match &**qualified_type {
-            Expression::Selector(selector) => {
-                assert_ident(&selector.x, "pkg");
-                assert_eq!(selector.sel.name, "V");
+            Expression::Type(Type::Name(NameType::Qualified(typ))) => {
+                assert_eq!(&typ.package.name, "pkg");
+                assert_eq!(typ.identifier.name, "V");
             }
             other => return Err(anyhow::anyhow!("expected qualified type, got {other:?}")),
         }
@@ -3454,9 +3482,16 @@ mod test {
             _ => panic!("Got unexpected underlying type or Expression"),
         };
         match generic_type {
-            Expression::Index(index) => {
-                assert_ident(&index.left, "Box");
-                assert_ident(&index.index, "int");
+            Expression::Type(Type::Instantiated(typ)) => {
+                match &typ.name {
+                    NameType::Ident(ident) => assert_eq!(&ident.name, "Box"),
+                    _ => panic!("Expected ident, got qualified name"),
+                };
+                assert_eq!(typ.arguements.len(), 1);
+                match &typ.arguements[0] {
+                    Expression::Type(typ) => assert_ident_type(typ, "int"),
+                    _ => panic!("Got non type expression when expected type "),
+                };
             }
             other => return Err(anyhow::anyhow!("expected generic type, got {other:?}")),
         }
@@ -3479,7 +3514,10 @@ mod test {
         match &field.typ.types[0] {
             TypeTerm::Type(Expression::Type(Type::Channel(channel))) => {
                 assert_eq!(channel.dir, Some(ast::ChanMode::Recv));
-                assert_ident(&channel.typ, "Event");
+                match &*channel.typ {
+                    Expression::Type(typ) => assert_ident_type(typ, "Event"),
+                    _ => panic!("Got non type expression for channel type"),
+                };
             }
             other => return Err(anyhow::anyhow!("expected channel field, got {other:?}")),
         }
