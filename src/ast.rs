@@ -146,7 +146,9 @@ pub enum NameType {
 pub struct InstantiatedType {
     pub pos: (usize, usize),
     pub name: NameType,
-    pub arguements: Vec<Type>,
+    // FIXME: Use `Type` here not `expression`
+    /// We use `Expression` for now due to limitations in the parser
+    pub arguements: Vec<Expression>,
 }
 
 #[derive(Debug, Clone)]

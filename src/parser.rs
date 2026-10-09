@@ -836,16 +836,16 @@ impl Parser {
                         let mut name = self.identifier_list(Some(name))?;
 
                         let typ = if name.len() == 1 && self.current_is(Operator::BarackLeft) {
-                            let typ = self.array_or_typeargs()?;
-                            if let ast::Expression::Index(mut typ) = typ {
-                                let name = name.pop().unwrap(); // FIXME: avoid this
-                                typ.left = Box::new(ast::Expression::Ident(name));
+                            let typ = self.array_or_typeargs(&mut name)?;
+                            if let ast::SingleType::Instantiated(typ) = typ {
                                 let tag = self.string_literal_or_none()?;
-                                let typ = ast::Expression::Index(typ);
+                                let typ = ast::Expression::Type(ast::Type::Single(
+                                    ast::SingleType::Instantiated(typ),
+                                ));
                                 let comments = self.drain_comments();
                                 return Ok(ast::Field { name: vec![], typ, tag, comments });
                             }
-                            typ
+                            ast::Expression::Type(ast::Type::Single(typ))
                         } else {
                             self.type_()?
                         };
@@ -1530,12 +1530,12 @@ impl Parser {
                         return Ok(list);
                     }
 
-                    match self.array_or_typeargs()? {
-                        ast::Expression::Index(mut typ) => {
+                    match self.array_or_typeargs(&mut id_list)? {
+                        ast::SingleType::Instantiated(typ) => {
                             // Type1, Type2[Args]
-                            let id = id_list.pop().unwrap(); // FIXME: avoid unwrap
-                            typ.left = Box::new(ast::Expression::Ident(id));
-                            let typ = ast::Expression::Index(typ);
+                            let typ = ast::Expression::Type(ast::Type::Single(
+                                ast::SingleType::Instantiated(typ),
+                            ));
 
                             let mut list =
                                 id_list.into_iter().map(|id| id.into()).collect::<Vec<_>>();
@@ -1547,7 +1547,7 @@ impl Parser {
                             let name = id_list;
                             return Ok(vec![ast::Field {
                                 name,
-                                typ,
+                                typ: ast::Expression::Type(ast::Type::Single(typ)),
                                 tag: None,
                                 comments: Default::default(),
                             }]);
@@ -1697,12 +1697,12 @@ impl Parser {
                         return Ok(list);
                     }
 
-                    match self.array_or_typeargs()? {
-                        ast::Expression::Index(mut typ) => {
+                    match self.array_or_typeargs(&mut id_list)? {
+                        ast::SingleType::Instantiated(typ) => {
                             // Type1, Type2[Args]
-                            let id = id_list.pop().unwrap(); // FIXME: avoid unwrap
-                            typ.left = Box::new(ast::Expression::Ident(id));
-                            let typ = ast::Expression::Index(typ);
+                            let typ = ast::Expression::Type(ast::Type::Single(
+                                ast::SingleType::Instantiated(typ),
+                            ));
 
                             let mut list = id_list
                                 .into_iter()
@@ -1727,7 +1727,7 @@ impl Parser {
                             return Ok(vec![ast::ParameterSpec {
                                 identifiers,
                                 variadic: None,
-                                typ,
+                                typ: ast::Expression::Type(ast::Type::Single(typ)),
                             }]);
                         }
                     }
@@ -1836,16 +1836,15 @@ impl Parser {
     /// if it have not extra comman and have an type after ']' then it must be an array type
     /// if list length greater than 1 then it must be type args
     /// if list have extra comma then it must be type args
-    /// else it will be an index expression
-    fn array_or_typeargs(&mut self) -> Result<ast::Expression> {
+    /// While theoretically the remaining type could be an index expression, this function is only ever called in type parsing contexts so will not be.
+    /// If it does parse type arguements then the last item in the identifiers Vec will be removed and used for the name of the instantiated type.
+    fn array_or_typeargs(&mut self, identifiers: &mut Vec<ast::Ident>) -> Result<ast::SingleType> {
         let pos0 = self.expect(Operator::BarackLeft)?;
         if self.current_is(Operator::BarackRight) {
             let pos = (pos0, self.expect(Operator::BarackRight)?);
             let typ = Box::new(self.type_()?);
             let slice = ast::SliceType { pos, typ };
-            return Ok(ast::Expression::Type(ast::Type::Single(
-                ast::SingleType::Slice(slice),
-            )));
+            return Ok(ast::SingleType::Slice(slice));
         }
 
         let (expr, comma) = self.type_list(false)?;
@@ -1859,16 +1858,21 @@ impl Parser {
                     typ: Box::new(typ),
                 };
 
-                return Ok(ast::Expression::Type(ast::Type::Single(
-                    ast::SingleType::Array(array),
-                )));
+                return Ok(ast::SingleType::Array(array));
             }
         }
 
-        Ok(ast::Expression::Index(ast::Index {
+        let Some(name) = identifiers.pop() else {
+            return Err(self.else_error_at(
+                pos0,
+                "Unexpected type arguements without a type to instantiate",
+            ));
+        };
+
+        Ok(ast::SingleType::Instantiated(ast::InstantiatedType {
             pos: (pos0, pos1),
-            left: Box::new(ast::Expression::List(vec![])), // FIXME: this should be None
-            index: Box::new(expr),
+            name: ast::NameType::Ident(name),
+            arguements: vec![expr],
         }))
     }
 
@@ -1909,30 +1913,6 @@ impl Parser {
             left: Box::new(left),
             index: Box::new(index),
         }))
-    }
-
-    fn check_field_list(&self, fields: ast::FieldList, trailing: bool) -> Result<ast::FieldList> {
-        match &fields.list[..] {
-            [] => Ok(fields),
-            [first, ..] => {
-                let named = !first.name.is_empty();
-                let (pos, list) = (fields.pos(), &fields.list);
-
-                for (index, field) in list.iter().enumerate() {
-                    if field.name.is_empty() == named {
-                        return Err(self.else_error_at(pos, "mixed named and unnamed parameters"));
-                    }
-
-                    let is_ellipsis = matches!(field.typ, ast::Expression::Ellipsis(..));
-                    if is_ellipsis && (index != list.len() - 1 || !trailing) {
-                        return Err(self
-                            .else_error_at(pos, "can only use ... with final parameter in list"));
-                    }
-                }
-
-                Ok(fields)
-            }
-        }
     }
 
     fn check_parameters(
