@@ -61,7 +61,7 @@ pub struct MapType {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Field {
     pub name: Vec<Ident>,
-    pub typ: Expression,
+    pub typ: TypeElem,
     pub tag: Option<StringLit>,
     pub comments: Vec<Rc<Comment>>,
 }
@@ -153,7 +153,7 @@ pub struct InstantiatedType {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum SingleType {
+pub enum Type {
     Name(NameType),
     Instantiated(InstantiatedType),
     Map(MapType),             // map[K]V
@@ -170,24 +170,24 @@ pub enum SingleType {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct UnderLyingType {
     pub pos: usize,
-    pub typ: Box<Type>,
+    // FIXME: Use Type here instead of Expression
+    pub typ: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct UnionType {
-    pub pos: usize,
-    pub left: Box<Type>,
-    pub right: Box<Type>,
+pub enum TypeTerm {
+    // FIXME: Use Type here instead of Expression
+    Type(Expression),
+    UnderLyingType(UnderLyingType),
+    // This will eventually just become the Type variant once we can ensure no expressions can be parsed here
+    Single(Type),
 }
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum Type {
-    Single(SingleType),
-    // FIXME: This should really be in a specific TypeTerm enum for interfaces
-    UnderLying(UnderLyingType),
-    Union(UnionType),
+pub struct TypeElem {
+    pub types: Vec<TypeTerm>,
 }
 
 // ================ Expression Definition ================
@@ -645,7 +645,9 @@ impl From<Ident> for Field {
     fn from(id: Ident) -> Self {
         Self {
             name: vec![],
-            typ: Expression::Ident(id),
+            typ: TypeElem {
+                types: vec![TypeTerm::Single(Type::Name(NameType::Ident(id)))],
+            },
             tag: None,
             comments: Default::default(),
         }
@@ -663,7 +665,9 @@ impl From<Expression> for Field {
     fn from(expr: Expression) -> Self {
         Self {
             name: vec![],
-            typ: expr,
+            typ: TypeElem {
+                types: vec![TypeTerm::Type(expr)],
+            },
             tag: None,
             comments: Default::default(),
         }
@@ -736,32 +740,38 @@ impl Expression {
     }
 }
 
-impl Type {
+impl TypeTerm {
     pub fn pos(&self) -> usize {
         match self {
             Self::Single(typ) => typ.pos(),
-            Self::UnderLying(typ) => typ.pos,
-            Self::Union(typ) => typ.pos,
+            Self::UnderLyingType(typ) => typ.pos,
+            Self::Type(typ) => typ.pos(),
         }
     }
 }
 
-impl SingleType {
+impl TypeElem {
+    pub fn pos(&self) -> usize {
+        self.types[0].pos()
+    }
+}
+
+impl Type {
     pub fn pos(&self) -> usize {
         match self {
-            SingleType::Map(x) => x.pos.0,
-            SingleType::Array(x) => x.pos.0,
-            SingleType::Slice(x) => x.pos.0,
-            SingleType::Function(f) => f.pos,
-            SingleType::Struct(x) => x.pos.0,
-            SingleType::Channel(x) => x.pos.0,
-            SingleType::Pointer(x) => x.pos,
-            SingleType::Interface(x) => x.pos,
-            SingleType::Name(name_type) => match name_type {
+            Type::Map(x) => x.pos.0,
+            Type::Array(x) => x.pos.0,
+            Type::Slice(x) => x.pos.0,
+            Type::Function(f) => f.pos,
+            Type::Struct(x) => x.pos.0,
+            Type::Channel(x) => x.pos.0,
+            Type::Pointer(x) => x.pos,
+            Type::Interface(x) => x.pos,
+            Type::Name(name_type) => match name_type {
                 NameType::Ident(ident) => ident.pos,
                 NameType::Qualified(qualified_ident) => qualified_ident.pos,
             },
-            SingleType::Instantiated(instantiated_type) => instantiated_type.pos.0,
+            Type::Instantiated(instantiated_type) => instantiated_type.pos.0,
         }
     }
 }
