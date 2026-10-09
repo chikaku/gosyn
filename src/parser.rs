@@ -645,15 +645,19 @@ impl Parser {
     /// TypeLit   = ArrayType | StructType | PointerType | FunctionType | InterfaceType |
     ///             SliceType | MapType | ChannelType .
     fn type_or_none(&mut self) -> Result<Option<ast::Expression>> {
-        match &self.current {
-            Some((_, Token::Operator(Operator::Star))) => {
+        let Some(current) = self.current.as_ref() else {
+            return Ok(None);
+        };
+
+        match current {
+            (_, Token::Operator(Operator::Star)) => {
                 let pos = self.expect(Operator::Star)?;
                 let typ = Box::new(self.type_()?);
                 let ptr = ast::PointerType { pos, typ };
                 Ok(Some(ast::Expression::Type(ast::Type::Pointer(ptr))))
             }
 
-            Some((_, Token::Operator(Operator::Arrow))) => {
+            (_, Token::Operator(Operator::Arrow)) => {
                 let pos = self.expect(Operator::Arrow)?;
                 let pos1 = self.expect(Keyword::Chan)?;
                 let typ = Box::new(self.type_()?);
@@ -663,12 +667,12 @@ impl Parser {
                 Ok(Some(ast::Expression::Type(ast::Type::Channel(chan))))
             }
 
-            Some((_, Token::Keyword(Keyword::Func))) => {
+            (_, Token::Keyword(Keyword::Func)) => {
                 let typ = self.func_type()?;
                 Ok(Some(ast::Expression::Type(ast::Type::Function(typ))))
             }
 
-            Some((_, Token::Operator(Operator::BarackLeft))) => {
+            (_, Token::Operator(Operator::BarackLeft)) => {
                 let pos = self.expect(Operator::BarackLeft)?;
                 if self.current_is(Operator::BarackRight) {
                     let pos = (pos, self.expect(Operator::BarackRight)?);
@@ -685,7 +689,7 @@ impl Parser {
                 Ok(Some(ast::Expression::Type(ast::Type::Array(arr))))
             }
 
-            Some((_, Token::Keyword(Keyword::Chan))) => {
+            (_, Token::Keyword(Keyword::Chan)) => {
                 let pos = self.expect(Keyword::Chan)?;
                 let pos1 = self.current_pos();
                 let dir = self.skipped(Operator::Arrow)?.then_some(ChanMode::Send);
@@ -695,7 +699,7 @@ impl Parser {
                 Ok(Some(ast::Expression::Type(ast::Type::Channel(chan))))
             }
 
-            Some((_, Token::Keyword(Keyword::Map))) => {
+            (_, Token::Keyword(Keyword::Map)) => {
                 self.next()?;
                 let pos0 = self.expect(Operator::BarackLeft)?;
                 let key = Box::new(self.type_()?);
@@ -706,24 +710,24 @@ impl Parser {
                 Ok(Some(ast::Expression::Type(ast::Type::Map(map))))
             }
 
-            Some((_, Token::Keyword(Keyword::Struct))) => {
+            (_, Token::Keyword(Keyword::Struct)) => {
                 let typ = self.struct_type()?;
                 Ok(Some(ast::Expression::Type(ast::Type::Struct(typ))))
             }
 
-            Some((_, Token::Keyword(Keyword::Interface))) => {
+            (_, Token::Keyword(Keyword::Interface)) => {
                 let typ = self.parse_interface_type()?;
                 Ok(Some(ast::Expression::Type(ast::Type::Interface(typ))))
             }
 
-            Some((_, Token::Literal(LitKind::Ident, _))) => {
+            (_, Token::Literal(LitKind::Ident, _)) => {
                 // `_` is a regular identifier syntactically; rejection of `_`
                 // in non-binding type positions is the type checker's job.
                 // Matches go/parser.
                 Ok(Some(self.qualified_ident(None)?))
             }
 
-            Some((pos0, Token::Operator(Operator::ParenLeft))) => {
+            (pos0, Token::Operator(Operator::ParenLeft)) => {
                 let pos0 = *pos0;
                 self.next()?;
                 let typ = self.type_()?;
