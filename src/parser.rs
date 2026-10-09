@@ -599,7 +599,7 @@ impl Parser {
         match self.type_or_none()? {
             Some(typ) => {
                 self.dec_expr_level();
-                Ok(typ)
+                Ok(ast::Expression::Type(typ))
             }
             None => Err(self.else_error("expect a type representation")),
         }
@@ -621,10 +621,10 @@ impl Parser {
         let comma = self.skipped(Operator::Comma)?;
         if comma {
             if let Some(typ) = self.type_or_none()? {
-                let mut list = vec![expr, typ];
+                let mut list = vec![expr, ast::Expression::Type(typ)];
                 while self.skipped(Operator::Comma)? {
                     match self.type_or_none()? {
-                        Some(typ) => list.push(typ),
+                        Some(typ) => list.push(ast::Expression::Type(typ)),
                         None => break,
                     }
                 }
@@ -644,7 +644,7 @@ impl Parser {
     /// TypeList  = Type { "," Type } .
     /// TypeLit   = ArrayType | StructType | PointerType | FunctionType | InterfaceType |
     ///             SliceType | MapType | ChannelType .
-    fn type_or_none(&mut self) -> Result<Option<ast::Expression>> {
+    fn type_or_none(&mut self) -> Result<Option<ast::Type>> {
         let Some(current) = self.current.as_ref() else {
             return Ok(None);
         };
@@ -654,7 +654,7 @@ impl Parser {
                 let pos = self.expect(Operator::Star)?;
                 let typ = Box::new(self.type_()?);
                 let ptr = ast::PointerType { pos, typ };
-                Ok(Some(ast::Expression::Type(ast::Type::Pointer(ptr))))
+                Ok(Some(ast::Type::Pointer(ptr)))
             }
 
             (_, Token::Operator(Operator::Arrow)) => {
@@ -664,12 +664,12 @@ impl Parser {
                 let pos = (pos, pos1);
                 let dir = Some(ChanMode::Recv);
                 let chan = ast::ChannelType { pos, dir, typ };
-                Ok(Some(ast::Expression::Type(ast::Type::Channel(chan))))
+                Ok(Some(ast::Type::Channel(chan)))
             }
 
             (_, Token::Keyword(Keyword::Func)) => {
                 let typ = self.func_type()?;
-                Ok(Some(ast::Expression::Type(ast::Type::Function(typ))))
+                Ok(Some(ast::Type::Function(typ)))
             }
 
             (_, Token::Operator(Operator::BarackLeft)) => {
@@ -678,7 +678,7 @@ impl Parser {
                     let pos = (pos, self.expect(Operator::BarackRight)?);
                     let typ = Box::new(self.type_()?);
                     let slice = ast::SliceType { pos, typ };
-                    return Ok(Some(ast::Expression::Type(ast::Type::Slice(slice))));
+                    return Ok(Some(ast::Type::Slice(slice)));
                 }
 
                 let len = Box::new(self.array_len()?);
@@ -686,7 +686,7 @@ impl Parser {
                 let typ = Box::new(self.type_()?);
                 let pos = (pos, pos1);
                 let arr = ast::ArrayType { len, typ, pos };
-                Ok(Some(ast::Expression::Type(ast::Type::Array(arr))))
+                Ok(Some(ast::Type::Array(arr)))
             }
 
             (_, Token::Keyword(Keyword::Chan)) => {
@@ -696,7 +696,7 @@ impl Parser {
                 let typ = Box::new(self.type_()?);
                 let pos = (pos, pos1);
                 let chan = ast::ChannelType { pos, dir, typ };
-                Ok(Some(ast::Expression::Type(ast::Type::Channel(chan))))
+                Ok(Some(ast::Type::Channel(chan)))
             }
 
             (_, Token::Keyword(Keyword::Map)) => {
@@ -707,24 +707,24 @@ impl Parser {
                 let val = Box::new(self.type_()?);
                 let pos = (pos0, pos1);
                 let map = ast::MapType { pos, key, val };
-                Ok(Some(ast::Expression::Type(ast::Type::Map(map))))
+                Ok(Some(ast::Type::Map(map)))
             }
 
             (_, Token::Keyword(Keyword::Struct)) => {
                 let typ = self.struct_type()?;
-                Ok(Some(ast::Expression::Type(ast::Type::Struct(typ))))
+                Ok(Some(ast::Type::Struct(typ)))
             }
 
             (_, Token::Keyword(Keyword::Interface)) => {
                 let typ = self.parse_interface_type()?;
-                Ok(Some(ast::Expression::Type(ast::Type::Interface(typ))))
+                Ok(Some(ast::Type::Interface(typ)))
             }
 
             (_, Token::Literal(LitKind::Ident, _)) => {
                 // `_` is a regular identifier syntactically; rejection of `_`
                 // in non-binding type positions is the type checker's job.
                 // Matches go/parser.
-                Ok(Some(ast::Expression::Type(self.qualified_ident(None)?)))
+                Ok(Some(self.qualified_ident(None)?))
             }
 
             (pos0, Token::Operator(Operator::ParenLeft)) => {
@@ -732,9 +732,9 @@ impl Parser {
                 self.next()?;
                 let typ = self.type_()?;
                 let pos1 = self.expect(Operator::ParenRight)?;
-                Ok(Some(ast::Expression::Paren(ast::ParenExpression {
+                Ok(Some(ast::Type::Paren(ast::ParenType {
                     pos: (pos0, pos1),
-                    expr: Box::new(typ),
+                    typ: Box::new(typ),
                 })))
             }
 
@@ -1427,7 +1427,7 @@ impl Parser {
                         vec![ast::ParameterSpec {
                             identifiers: vec![],
                             variadic: None,
-                            typ,
+                            typ: ast::Expression::Type(typ),
                         }]
                     })
                     .unwrap_or_default();
@@ -1815,7 +1815,7 @@ impl Parser {
                 let array = ast::ArrayType {
                     pos: (pos0, pos1),
                     len: Box::new(expr),
-                    typ: Box::new(typ),
+                    typ: Box::new(ast::Expression::Type(typ)),
                 };
 
                 return Ok(ast::Type::Array(array));
