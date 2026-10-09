@@ -153,6 +153,13 @@ pub struct InstantiatedType {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ParenType {
+    pub pos: (usize, usize),
+    pub typ: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Type {
     Name(NameType),
     Instantiated(InstantiatedType),
@@ -164,6 +171,7 @@ pub enum Type {
     Channel(ChannelType),     // <-chan T | chan<- T | chan T
     Pointer(PointerType),     // *T
     Interface(InterfaceType), // interface { ... }
+    Paren(ParenType),
 }
 
 #[derive(Debug, Clone)]
@@ -772,6 +780,7 @@ impl Type {
                 NameType::Qualified(qualified_ident) => qualified_ident.pos,
             },
             Type::Instantiated(instantiated_type) => instantiated_type.pos.0,
+            Type::Paren(paren_type) => paren_type.pos.0,
         }
     }
 }
