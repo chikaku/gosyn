@@ -605,39 +605,6 @@ impl Parser {
         }
     }
 
-    /// parse a comma-separated type list
-    /// in some case we found an '[' and it may be a list of type instance
-    /// or just an index expression
-    /// so we have a parameter `strict`
-    /// if not strict, the first element may be a expression
-    /// if strict we must have a list of type
-    fn type_list(&mut self, strict: bool) -> Result<(ast::Expression, bool)> {
-        self.inc_expr_level()?;
-        let expr = match strict {
-            true => self.type_()?,
-            false => self.expression()?,
-        };
-
-        let comma = self.skipped(Operator::Comma)?;
-        if comma {
-            if let Some(typ) = self.type_or_none()? {
-                let mut list = vec![expr, ast::Expression::Type(typ)];
-                while self.skipped(Operator::Comma)? {
-                    match self.type_or_none()? {
-                        Some(typ) => list.push(ast::Expression::Type(typ)),
-                        None => break,
-                    }
-                }
-
-                self.dec_expr_level();
-                return Ok((ast::Expression::List(list), true));
-            }
-        }
-
-        self.dec_expr_level();
-        Ok((expr, comma))
-    }
-
     /// Type      = TypeName [ TypeArgs ] | TypeLit | "(" Type ")" .
     /// TypeName  = identifier | QualifiedIdent .
     /// TypeArgs  = "[" TypeList [ "," ] "]" .
@@ -1807,7 +1774,27 @@ impl Parser {
             return Ok(ast::Type::Slice(slice));
         }
 
-        let (expr, comma) = self.type_list(false)?;
+        let (expr, mut types, comma) = {
+            self.inc_expr_level()?;
+            let expr = self.expression()?;
+            let mut list = vec![];
+            let mut comma = self.skipped(Operator::Comma)?;
+            if comma {
+                if let Some(typ) = self.type_or_none()? {
+                    list.push(typ);
+                    while self.skipped(Operator::Comma)? {
+                        match self.type_or_none()? {
+                            Some(typ) => list.push(typ),
+                            None => break,
+                        }
+                    }
+                    comma = true;
+                }
+            }
+
+            self.dec_expr_level();
+            (expr, list, comma)
+        };
         let pos1 = self.expect(Operator::BarackRight)?;
 
         if !comma {
@@ -1829,10 +1816,19 @@ impl Parser {
             ));
         };
 
+        let first_type = ast::Type::try_from(expr).map_err(|e| {
+            self.else_error_at(
+                pos0,
+                format!(
+                    "expression in type instantiation, or Expression to Type is missing cases: {e}"
+                ),
+            )
+        })?;
+        types.insert(0, first_type);
         Ok(ast::Type::Instantiated(ast::InstantiatedType {
             pos: (pos0, pos1),
             name: ast::NameType::Ident(name),
-            arguements: vec![expr],
+            arguements: types,
         }))
     }
 
@@ -1869,14 +1865,32 @@ impl Parser {
             return Err(self.else_error("expect type argument list"));
         }
 
-        let (index, _) = self.type_list(true)?;
+        let (arguements, _) = {
+            self.inc_expr_level()?;
+            // FIXME: We should not be unwrapping
+            let expr = self.type_or_none()?.unwrap();
+
+            let mut list = vec![expr];
+            let mut comma = self.skipped(Operator::Comma)?;
+            if comma {
+                if let Some(typ) = self.type_or_none()? {
+                    list.push(typ);
+                    while self.skipped(Operator::Comma)? {
+                        match self.type_or_none()? {
+                            Some(typ) => list.push(typ),
+                            None => break,
+                        }
+                    }
+                    comma = true;
+                }
+            }
+
+            self.dec_expr_level();
+            (list, comma)
+        };
         let pos = (pos0, self.expect(Operator::BarackRight)?);
 
-        Ok(ast::InstantiatedType {
-            pos,
-            name,
-            arguements: vec![index],
-        })
+        Ok(ast::InstantiatedType { pos, name, arguements })
     }
 
     fn check_parameters(
@@ -3488,10 +3502,8 @@ mod test {
                     _ => panic!("Expected ident, got qualified name"),
                 };
                 assert_eq!(typ.arguements.len(), 1);
-                match &typ.arguements[0] {
-                    Expression::Type(typ) => assert_ident_type(typ, "int"),
-                    _ => panic!("Got non type expression when expected type "),
-                };
+
+                assert_ident_type(&typ.arguements[0], "int");
             }
             other => return Err(anyhow::anyhow!("expected generic type, got {other:?}")),
         }

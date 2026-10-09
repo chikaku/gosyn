@@ -148,7 +148,7 @@ pub struct InstantiatedType {
     pub name: NameType,
     // FIXME: Use `Type` here not `expression`
     /// We use `Expression` for now due to limitations in the parser
-    pub arguements: Vec<Expression>,
+    pub arguements: Vec<Type>,
 }
 
 #[derive(Debug, Clone)]
@@ -678,6 +678,19 @@ impl From<Expression> for Field {
             },
             tag: None,
             comments: Default::default(),
+        }
+    }
+}
+
+// This implementation is currently only used for parsing the ambiguous case of type instantiations vs arrays.
+// FIXME: This implementation needs to be filled out properly as there are many cases missing
+impl TryFrom<Expression> for Type {
+    type Error = String;
+    fn try_from(exp: Expression) -> Result<Self, Self::Error> {
+        match exp {
+            Expression::Type(typ) => Ok(typ),
+            Expression::Ident(ident) => Ok(Type::Name(NameType::Ident(ident))),
+            other => Err(format!("Cannot convert {other:?} to Type")),
         }
     }
 }
