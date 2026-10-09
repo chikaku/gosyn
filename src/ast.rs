@@ -80,13 +80,28 @@ pub struct StructType {
     pub fields: Vec<Field>,
 }
 
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ParameterSpec {
+    pub identifiers: Vec<Ident>,
+    pub variadic: Option<usize>, // If Some then represents the position of the ... operator
+    pub typ: Expression,
+}
+
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Parameters {
+    pub pos: Option<(usize, usize)>,
+    pub parameters: Vec<ParameterSpec>,
+}
+
 #[derive(Default, Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FuncType {
     pub pos: usize,
     pub typ_params: FieldList,
-    pub params: FieldList,
-    pub result: FieldList,
+    pub params: Parameters,
+    pub result: Parameters,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -376,7 +391,7 @@ pub struct TypeSpec {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FuncDecl {
     pub docs: Vec<Rc<Comment>>,
-    pub recv: Option<FieldList>,
+    pub recv: Option<Parameters>,
     pub name: Ident,
     pub typ: FuncType,
     pub body: Option<BlockStmt>,
@@ -671,6 +686,24 @@ impl FieldList {
             }
 
             return field.typ.pos();
+        }
+
+        panic!("call pos on empty FieldList");
+    }
+}
+
+impl Parameters {
+    pub fn pos(&self) -> usize {
+        if let Some((pos, _)) = self.pos {
+            return pos;
+        }
+
+        if let Some(parameter) = self.parameters.first() {
+            if let Some(name) = parameter.identifiers.first() {
+                return name.pos;
+            }
+
+            return parameter.typ.pos();
         }
 
         panic!("call pos on empty FieldList");

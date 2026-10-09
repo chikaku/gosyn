@@ -419,9 +419,9 @@ impl Parser {
         };
 
         let params = self.parameters()?;
-        let params = self.check_field_list(params, true)?;
+        let params = self.check_parameters(params, true)?;
         let result = self.parse_result()?;
-        let result = self.check_field_list(result, false)?;
+        let result = self.check_parameters(result, false)?;
 
         let typ = ast::FuncType { pos, typ_params, params, result };
 
@@ -790,9 +790,9 @@ impl Parser {
         }
 
         let params = self.parameters()?;
-        let params = self.check_field_list(params, true)?;
+        let params = self.check_parameters(params, true)?;
         let result = self.parse_result()?;
-        let result = self.check_field_list(result, false)?;
+        let result = self.check_parameters(result, false)?;
         let typ_params = ast::FieldList::default();
 
         Ok(ast::FuncType { pos, typ_params, params, result })
@@ -913,9 +913,9 @@ impl Parser {
         let id = self.identifier()?;
 
         let params = self.parameters()?;
-        let params = self.check_field_list(params, true)?;
+        let params = self.check_parameters(params, true)?;
         let result = self.parse_result()?;
-        let result = self.check_field_list(result, false)?;
+        let result = self.check_parameters(result, false)?;
         let func = ast::FuncType {
             params,
             result,
@@ -1454,36 +1454,42 @@ impl Parser {
         self.parse_block_stmt()
     }
 
-    fn parse_result(&mut self) -> Result<ast::FieldList> {
+    fn parse_result(&mut self) -> Result<ast::Parameters> {
         Ok(match self.current {
             Some((_, Token::Operator(Operator::ParenLeft))) => self.parameters()?,
             _ => {
-                let list = self
+                let parameters = self
                     .type_or_none()?
-                    .map(|typ| vec![typ.into()])
+                    .map(|typ| {
+                        vec![ast::ParameterSpec {
+                            identifiers: vec![],
+                            variadic: None,
+                            typ,
+                        }]
+                    })
                     .unwrap_or_default();
 
-                ast::FieldList { pos: None, list }
+                ast::Parameters { pos: None, parameters }
             }
         })
     }
 
     /// Parameters     = "(" [ ParameterList [ "," ] ] ")" .
     /// ParameterList  = ParameterDecl { "," ParameterDecl } .
-    fn parameters(&mut self) -> Result<ast::FieldList> {
+    fn parameters(&mut self) -> Result<ast::Parameters> {
         self.params_list(Operator::ParenLeft, Operator::ParenRight)
     }
 
     fn type_parameters(&mut self) -> Result<ast::FieldList> {
-        self.params_list(Operator::BarackLeft, Operator::BarackRight)
+        self.field_list(Operator::BarackLeft, Operator::BarackRight)
     }
 
-    fn params_list(&mut self, open: Operator, close: Operator) -> Result<ast::FieldList> {
+    fn field_list(&mut self, open: Operator, close: Operator) -> Result<ast::FieldList> {
         let pos0 = self.expect(open)?;
 
         let mut list = vec![];
         while !self.current_is(close) {
-            list.extend(self.parse_parameter_decl()?);
+            list.extend(self.parse_field_decl()?);
             self.skipped(Operator::Comma)?; // extra comma
         }
 
@@ -1492,7 +1498,7 @@ impl Parser {
     }
 
     /// ParameterDecl = [ IdentifierList ] [ "..." ] Type .
-    fn parse_parameter_decl(&mut self) -> Result<Vec<ast::Field>> {
+    fn parse_field_decl(&mut self) -> Result<Vec<ast::Field>> {
         // "..." Type
         if self.current_is(Operator::DotDotDot) {
             let pos = self.expect(Operator::DotDotDot)?;
@@ -1616,6 +1622,214 @@ impl Parser {
         }
     }
 
+    fn params_list(&mut self, open: Operator, close: Operator) -> Result<ast::Parameters> {
+        let pos0 = self.expect(open)?;
+
+        let mut parameters = vec![];
+        while !self.current_is(close) {
+            parameters.extend(self.parse_parameter_decl()?);
+            self.skipped(Operator::Comma)?; // extra comma
+        }
+
+        let pos = Some((pos0, self.expect(close)?));
+        Ok(ast::Parameters { pos, parameters })
+    }
+
+    /// ParameterDecl = [ IdentifierList ] [ "..." ] Type .
+    fn parse_parameter_decl(&mut self) -> Result<Vec<ast::ParameterSpec>> {
+        // "..." Type
+        if self.current_is(Operator::DotDotDot) {
+            let pos = self.expect(Operator::DotDotDot)?;
+            let typ = self.type_()?;
+            return Ok(vec![ast::ParameterSpec {
+                identifiers: vec![],
+                variadic: Some(pos),
+                typ,
+            }]);
+        }
+
+        // Type
+        if self.current_not(LitKind::Ident) {
+            let typ = self.type_()?;
+            return Ok(vec![ast::ParameterSpec {
+                identifiers: vec![],
+                variadic: None,
+                typ,
+            }]);
+        }
+
+        let mut end_with_comma = false;
+        let mut id_list = vec![self.identifier()?];
+
+        loop {
+            match self.current_kind()? {
+                TokenKind::Operator(Operator::ParenRight) => {
+                    // Type1, Type2) | Type1, Type2,)
+                    return Ok(id_list
+                        .into_iter()
+                        .map(|id| ast::ParameterSpec {
+                            identifiers: vec![],
+                            variadic: None,
+                            typ: ast::Expression::Type(ast::Type::Single(ast::SingleType::Name(
+                                ast::NameType::Ident(id),
+                            ))),
+                        })
+                        .collect());
+                }
+                TokenKind::Operator(Operator::BarackLeft) => {
+                    if end_with_comma {
+                        // a, b, []
+                        let mut list = id_list
+                            .into_iter()
+                            .map(|id| ast::ParameterSpec {
+                                identifiers: vec![],
+                                variadic: None,
+                                typ: ast::Expression::Type(ast::Type::Single(
+                                    ast::SingleType::Name(ast::NameType::Ident(id)),
+                                )),
+                            })
+                            .collect::<Vec<_>>();
+                        list.push(ast::ParameterSpec {
+                            identifiers: vec![],
+                            variadic: None,
+                            typ: self.type_()?,
+                        });
+                        return Ok(list);
+                    }
+
+                    match self.array_or_typeargs()? {
+                        ast::Expression::Index(mut typ) => {
+                            // Type1, Type2[Args]
+                            let id = id_list.pop().unwrap(); // FIXME: avoid unwrap
+                            typ.left = Box::new(ast::Expression::Ident(id));
+                            let typ = ast::Expression::Index(typ);
+
+                            let mut list = id_list
+                                .into_iter()
+                                .map(|id| ast::ParameterSpec {
+                                    identifiers: vec![],
+                                    variadic: None,
+                                    typ: ast::Expression::Type(ast::Type::Single(
+                                        ast::SingleType::Name(ast::NameType::Ident(id)),
+                                    )),
+                                })
+                                .collect::<Vec<_>>();
+                            list.push(ast::ParameterSpec {
+                                identifiers: vec![],
+                                variadic: None,
+                                typ,
+                            });
+                            return Ok(list);
+                        }
+                        typ => {
+                            // a, b [N]T
+                            let identifiers = id_list;
+                            return Ok(vec![ast::ParameterSpec {
+                                identifiers,
+                                variadic: None,
+                                typ,
+                            }]);
+                        }
+                    }
+                }
+                TokenKind::Operator(Operator::DotDotDot) => {
+                    if end_with_comma {
+                        // a, b, ...Type
+                        let pos = self.expect(Operator::DotDotDot)?;
+                        let typ = self.type_()?;
+
+                        let mut list = id_list
+                            .into_iter()
+                            .map(|id| ast::ParameterSpec {
+                                identifiers: vec![],
+                                variadic: None,
+                                typ: ast::Expression::Type(ast::Type::Single(
+                                    ast::SingleType::Name(ast::NameType::Ident(id)),
+                                )),
+                            })
+                            .collect::<Vec<_>>();
+                        list.push(ast::ParameterSpec {
+                            identifiers: vec![],
+                            variadic: Some(pos),
+                            typ,
+                        });
+                        return Ok(list);
+                    }
+
+                    if id_list.len() > 1 {
+                        return Err(self.else_error("ellipsis type should have only one parameter"));
+                    }
+
+                    // a ...Type
+                    let identifiers = id_list;
+                    let pos = self.expect(Operator::DotDotDot)?;
+                    let typ = self.type_()?;
+                    return Ok(vec![ast::ParameterSpec {
+                        identifiers,
+                        variadic: Some(pos),
+                        typ,
+                    }]);
+                }
+                TokenKind::Operator(Operator::Dot) => {
+                    if end_with_comma {
+                        return Err(self.else_error("unexpected '.' after ','"));
+                    }
+
+                    let pkg = id_list.pop();
+                    let typ = self.qualified_ident(pkg)?;
+                    let mut list = id_list
+                        .into_iter()
+                        .map(|id| ast::ParameterSpec {
+                            identifiers: vec![],
+                            variadic: None,
+                            typ: ast::Expression::Type(ast::Type::Single(ast::SingleType::Name(
+                                ast::NameType::Ident(id),
+                            ))),
+                        })
+                        .collect::<Vec<_>>();
+                    list.push(ast::ParameterSpec {
+                        identifiers: vec![],
+                        variadic: None,
+                        typ,
+                    });
+                    return Ok(list);
+                }
+                TokenKind::Operator(Operator::Comma) => {
+                    self.next()?;
+                    end_with_comma = true;
+                    if self.current_is(LitKind::Ident) {
+                        id_list.push(self.identifier()?);
+                        end_with_comma = false;
+                    }
+                }
+                _ => {
+                    if end_with_comma {
+                        // a, b, Type
+                        return Ok(id_list
+                            .into_iter()
+                            .map(|id| ast::ParameterSpec {
+                                identifiers: vec![],
+                                variadic: None,
+                                typ: ast::Expression::Type(ast::Type::Single(
+                                    ast::SingleType::Name(ast::NameType::Ident(id)),
+                                )),
+                            })
+                            .collect::<Vec<_>>());
+                    }
+
+                    // a, b Type
+                    let typ = self.parse_type_elem()?;
+                    let identifiers = id_list;
+                    return Ok(vec![ast::ParameterSpec {
+                        identifiers,
+                        variadic: None,
+                        typ,
+                    }]);
+                }
+            }
+        }
+    }
+
     /// x [n]E or x[n,], x[n1, n2], ...
     /// when we found an '[' it maybe an slice or array type or type args
     /// we will parse type list
@@ -1717,6 +1931,35 @@ impl Parser {
                 }
 
                 Ok(fields)
+            }
+        }
+    }
+
+    fn check_parameters(
+        &self,
+        parameters: ast::Parameters,
+        trailing: bool,
+    ) -> Result<ast::Parameters> {
+        match &parameters.parameters[..] {
+            [] => Ok(parameters),
+            [first, ..] => {
+                let named = !first.identifiers.is_empty();
+                let (pos, params) = (parameters.pos(), &parameters.parameters);
+
+                for (index, parameter) in params.iter().enumerate() {
+                    if parameter.identifiers.is_empty() == named {
+                        return Err(self.else_error_at(pos, "mixed named and unnamed parameters"));
+                    }
+
+                    let is_ellipsis = parameter.variadic.is_some()
+                        || matches!(parameter.typ, ast::Expression::Ellipsis(..));
+                    if is_ellipsis && (index != params.len() - 1 || !trailing) {
+                        return Err(self
+                            .else_error_at(pos, "can only use ... with final parameter in list"));
+                    }
+                }
+
+                Ok(parameters)
             }
         }
     }
@@ -2613,8 +2856,8 @@ mod test {
             assert_eq!(func.recv.as_ref().map(|_| ()), none_recv);
             assert_eq!(func.typ.typ_params.list.len(), type_params_len);
 
-            assert_eq!(func.typ.params.list.len(), params_len);
-            assert_eq!(func.typ.result.list.len(), result_len);
+            assert_eq!(func.typ.params.parameters.len(), params_len);
+            assert_eq!(func.typ.result.parameters.len(), result_len);
 
             Ok(func)
         };
@@ -2827,7 +3070,7 @@ mod test {
         let check = |s| {
             let mut ps = new_started_parser(s);
             let params = ps.parameters()?;
-            ps.check_field_list(params, true)
+            ps.check_parameters(params, true)
         };
 
         assert!(check("(,)").is_err());
@@ -2852,7 +3095,7 @@ mod test {
         let check = |s| {
             let mut ps = new_started_parser(s);
             let params = ps.parameters()?;
-            ps.check_field_list(params, false)
+            ps.check_parameters(params, false)
         };
 
         assert!(check("(...bool)").is_err());
@@ -3025,8 +3268,8 @@ mod test {
 
         match parse_expression_complete("func(x int) int { return x }")? {
             Expression::FuncLit(function) => {
-                assert_eq!(function.typ.params.list.len(), 1);
-                assert_eq!(function.typ.result.list.len(), 1);
+                assert_eq!(function.typ.params.parameters.len(), 1);
+                assert_eq!(function.typ.result.parameters.len(), 1);
                 assert_eq!(function.body.list.len(), 1);
             }
             other => return Err(anyhow::anyhow!("expected function literal, got {other:?}")),
