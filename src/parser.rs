@@ -782,7 +782,7 @@ impl Parser {
                     )) => {
                         let typ = self.qualified_ident(Some(name))?;
                         let typ = ast::TypeElem {
-                            types: vec![ast::TypeTerm::Single(typ)],
+                            types: vec![ast::TypeTerm::Type(typ)],
                         };
                         let tag = self.string_literal_or_none()?;
                         let comments = self.drain_comments();
@@ -796,14 +796,12 @@ impl Parser {
                             if let ast::Type::Instantiated(typ) = typ {
                                 let tag = self.string_literal_or_none()?;
                                 let typ = ast::TypeElem {
-                                    types: vec![ast::TypeTerm::Single(ast::Type::Instantiated(
-                                        typ,
-                                    ))],
+                                    types: vec![ast::TypeTerm::Type(ast::Type::Instantiated(typ))],
                                 };
                                 let comments = self.drain_comments();
                                 return Ok(ast::Field { name: vec![], typ, tag, comments });
                             }
-                            ast::TypeTerm::Single(typ)
+                            ast::TypeTerm::Type(typ)
                         } else {
                             ast::TypeTerm::Type(self.type_()?)
                         };
@@ -821,7 +819,7 @@ impl Parser {
                 let embedded_type = Box::new(embedded_type);
                 let pointer_type = ast::PointerType { pos, typ: embedded_type };
                 let typ = ast::TypeElem {
-                    types: vec![ast::TypeTerm::Single(ast::Type::Pointer(pointer_type))],
+                    types: vec![ast::TypeTerm::Type(ast::Type::Pointer(pointer_type))],
                 };
                 let tag = self.string_literal_or_none()?;
                 let comments = self.drain_comments();
@@ -888,7 +886,7 @@ impl Parser {
             tag: None,
             name: vec![id],
             typ: ast::TypeElem {
-                types: vec![ast::TypeTerm::Single(ast::Type::Function(func))],
+                types: vec![ast::TypeTerm::Type(ast::Type::Function(func))],
             },
             comments: Default::default(),
         })
@@ -1435,7 +1433,7 @@ impl Parser {
             return Ok(vec![ast::Field {
                 name: vec![],
                 typ: ast::TypeElem {
-                    types: vec![ast::TypeTerm::Single(typ)],
+                    types: vec![ast::TypeTerm::Type(typ)],
                 },
                 tag: None,
                 comments: Default::default(),
@@ -1454,7 +1452,7 @@ impl Parser {
                         .map(|id| ast::Field {
                             name: vec![],
                             typ: ast::TypeElem {
-                                types: vec![ast::TypeTerm::Single(ast::Type::Name(
+                                types: vec![ast::TypeTerm::Type(ast::Type::Name(
                                     ast::NameType::Ident(id),
                                 ))],
                             },
@@ -1471,7 +1469,7 @@ impl Parser {
                             .map(|id| ast::Field {
                                 name: vec![],
                                 typ: ast::TypeElem {
-                                    types: vec![ast::TypeTerm::Single(ast::Type::Name(
+                                    types: vec![ast::TypeTerm::Type(ast::Type::Name(
                                         ast::NameType::Ident(id),
                                     ))],
                                 },
@@ -1482,7 +1480,7 @@ impl Parser {
                         list.push(ast::Field {
                             name: vec![],
                             typ: ast::TypeElem {
-                                types: vec![ast::TypeTerm::Single(self.type_()?)],
+                                types: vec![ast::TypeTerm::Type(self.type_()?)],
                             },
                             tag: None,
                             comments: Default::default(),
@@ -1500,7 +1498,7 @@ impl Parser {
                                 .map(|id| ast::Field {
                                     name: vec![],
                                     typ: ast::TypeElem {
-                                        types: vec![ast::TypeTerm::Single(ast::Type::Name(
+                                        types: vec![ast::TypeTerm::Type(ast::Type::Name(
                                             ast::NameType::Ident(id),
                                         ))],
                                     },
@@ -1511,7 +1509,7 @@ impl Parser {
                             list.push(ast::Field {
                                 name: vec![],
                                 typ: ast::TypeElem {
-                                    types: vec![ast::TypeTerm::Single(typ)],
+                                    types: vec![ast::TypeTerm::Type(typ)],
                                 },
                                 tag: None,
                                 comments: Default::default(),
@@ -1524,7 +1522,7 @@ impl Parser {
                             return Ok(vec![ast::Field {
                                 name,
                                 typ: ast::TypeElem {
-                                    types: vec![ast::TypeTerm::Single(typ)],
+                                    types: vec![ast::TypeTerm::Type(typ)],
                                 },
                                 tag: None,
                                 comments: Default::default(),
@@ -1544,7 +1542,7 @@ impl Parser {
                         .map(|id| ast::Field {
                             name: vec![],
                             typ: ast::TypeElem {
-                                types: vec![ast::TypeTerm::Single(ast::Type::Name(
+                                types: vec![ast::TypeTerm::Type(ast::Type::Name(
                                     ast::NameType::Ident(id),
                                 ))],
                             },
@@ -1555,7 +1553,7 @@ impl Parser {
                     list.push(ast::Field {
                         name: vec![],
                         typ: ast::TypeElem {
-                            types: vec![ast::TypeTerm::Single(typ)],
+                            types: vec![ast::TypeTerm::Type(typ)],
                         },
                         tag: None,
                         comments: Default::default(),
@@ -1578,7 +1576,7 @@ impl Parser {
                             .map(|id| ast::Field {
                                 name: vec![],
                                 typ: ast::TypeElem {
-                                    types: vec![ast::TypeTerm::Single(ast::Type::Name(
+                                    types: vec![ast::TypeTerm::Type(ast::Type::Name(
                                         ast::NameType::Ident(id),
                                     ))],
                                 },
@@ -2306,7 +2304,12 @@ impl Parser {
 
         Ok(if type_switch {
             let tag = tag.map(Box::new);
-            ast::Statement::TypeSwitch(ast::TypeSwitchStmt { pos, init, tag, block })
+            ast::Statement::Switch(ast::SwitchStmt::Type(ast::TypeSwitchStmt {
+                pos,
+                init,
+                tag,
+                block,
+            }))
         } else {
             let tag = match tag {
                 None => None,
@@ -2314,7 +2317,12 @@ impl Parser {
                 _ => return Err(self.else_error("switch tag must be an expression")),
             };
 
-            ast::Statement::Switch(ast::SwitchStmt { pos, init, tag, block })
+            ast::Statement::Switch(ast::SwitchStmt::Expr(ast::ExprSwitchStmt {
+                pos,
+                init,
+                tag,
+                block,
+            }))
         })
     }
 
@@ -2655,7 +2663,7 @@ fn is_type_elem(expr: &ast::Expression) -> bool {
 
 #[cfg(test)]
 mod test {
-    use crate::ast::{self, Declaration, Expression, NameType, Type, TypeTerm};
+    use crate::ast::{self, Declaration, Expression, NameType, SwitchStmt, Type, TypeTerm};
     use crate::parser::Parser;
     use crate::token::{Keyword, Operator};
 
@@ -3444,7 +3452,7 @@ mod test {
         assert_eq!(method.name[0].name, "Method");
         assert!(matches!(
             method.typ.types[0],
-            TypeTerm::Single(Type::Function(_))
+            TypeTerm::Type(Type::Function(_))
         ));
 
         Ok(())
@@ -3498,19 +3506,19 @@ mod test {
 
         assert!(struct_type.fields.iter().all(|field| field.name.is_empty()));
         let plain_type = match &plain.typ.types[0] {
-            TypeTerm::Single(typ) => typ,
+            TypeTerm::Type(typ) => typ,
             _ => panic!("Expected Expression"),
         };
         assert_ident_type(plain_type, "T");
 
         let pointer_type = match &pointer.typ.types[0] {
-            TypeTerm::Single(Type::Pointer(typ)) => &typ.typ,
+            TypeTerm::Type(Type::Pointer(typ)) => &typ.typ,
             _ => panic!("Got unexpected Underlying typ or expression"),
         };
         assert_ident_type(pointer_type, "U");
 
         let qualified_type = match &qualified_pointer.typ.types[0] {
-            TypeTerm::Single(Type::Pointer(typ)) => &typ.typ,
+            TypeTerm::Type(Type::Pointer(typ)) => &typ.typ,
             _ => panic!("Got unexpected underlying type or Expression"),
         };
         match &**qualified_type {
@@ -3521,7 +3529,7 @@ mod test {
             other => return Err(anyhow::anyhow!("expected qualified type, got {other:?}")),
         }
         let generic_type = match &generic_pointer.typ.types[0] {
-            TypeTerm::Single(Type::Pointer(typ)) => &*typ.typ,
+            TypeTerm::Type(Type::Pointer(typ)) => &*typ.typ,
             _ => panic!("Got unexpected underlying type or Expression"),
         };
         match generic_type {
@@ -3940,10 +3948,16 @@ mod test {
         };
 
         let swt = switch("switch x {}")?;
+        let SwitchStmt::Expr(swt) = swt else {
+            panic!("Got Type switch where expected ExprSwitch")
+        };
         assert!(swt.init.is_none());
         assert!(swt.tag.is_some());
 
         let swt = switch("switch ;x {}")?;
+        let SwitchStmt::Expr(swt) = swt else {
+            panic!("Got Type switch where expected ExprSwitch")
+        };
         assert!(swt.init.is_none());
         assert!(swt.tag.is_some());
 
@@ -3954,6 +3968,9 @@ mod test {
             default:
         }",
         )?;
+        let SwitchStmt::Expr(swt) = swt else {
+            panic!("Got Type switch where expected ExprSwitch")
+        };
         assert!(swt.init.is_none());
         assert!(swt.tag.is_none());
         assert_eq!(swt.block.body.len(), 2);
@@ -3964,6 +3981,9 @@ mod test {
             print(5)
         }",
         )?;
+        let SwitchStmt::Expr(swt) = swt else {
+            panic!("Got Type switch where expected ExprSwitch")
+        };
         assert!(swt.init.is_none());
         assert!(swt.tag.is_some());
 
@@ -3974,6 +3994,9 @@ mod test {
             case 4, 5, 6, 7: s2()
             }",
         )?;
+        let SwitchStmt::Expr(swt) = swt else {
+            panic!("Got Type switch where expected ExprSwitch")
+        };
         assert!(swt.init.is_none());
         assert!(swt.tag.is_some());
 
@@ -3983,6 +4006,9 @@ mod test {
             default: return x
             }",
         )?;
+        let SwitchStmt::Expr(swt) = swt else {
+            panic!("Got Type switch where expected ExprSwitch")
+        };
         assert!(swt.init.is_some());
         assert!(swt.tag.is_none());
 
@@ -3993,6 +4019,9 @@ mod test {
             default:
             }",
         )?;
+        let SwitchStmt::Expr(swt) = swt else {
+            panic!("Got Type switch where expected ExprSwitch")
+        };
         assert!(swt.init.is_none());
         assert!(swt.tag.is_some());
 
@@ -4003,6 +4032,9 @@ mod test {
             default:
             }",
         )?;
+        let SwitchStmt::Expr(swt) = swt else {
+            panic!("Got Type switch where expected ExprSwitch")
+        };
         assert!(swt.init.is_some());
         assert!(swt.tag.is_some());
 
@@ -4012,6 +4044,9 @@ mod test {
             case \"\":
             }",
         )?;
+        let SwitchStmt::Expr(swt) = swt else {
+            panic!("Got Type switch where expected ExprSwitch")
+        };
         assert!(swt.init.is_some());
         assert!(swt.tag.is_some());
 
@@ -4035,7 +4070,7 @@ mod test {
             let statement = parser.parse_switch_stmt()?;
             finish(&mut parser)?;
             match statement {
-                ast::Statement::TypeSwitch(swt) => Ok(swt),
+                ast::Statement::Switch(SwitchStmt::Type(swt)) => Ok(swt),
                 _ => Err(anyhow::anyhow!("not a TYPE_SWITCH statement")),
             }
         };

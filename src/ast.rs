@@ -184,8 +184,6 @@ pub struct UnderLyingType {
 pub enum TypeTerm {
     Type(Type),
     UnderLyingType(UnderLyingType),
-    // This will eventually just become the Type variant once we can ensure no expressions can be parsed here
-    Single(Type),
 }
 
 #[derive(Debug, Clone)]
@@ -519,7 +517,7 @@ pub struct CaseBlock {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct SwitchStmt {
+pub struct ExprSwitchStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
     pub tag: Option<Expression>,
@@ -533,6 +531,13 @@ pub struct TypeSwitchStmt {
     pub init: Option<Box<Statement>>,
     pub tag: Option<Box<Statement>>,
     pub block: CaseBlock,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SwitchStmt {
+    Expr(ExprSwitchStmt),
+    Type(TypeSwitchStmt),
 }
 
 #[derive(Debug, Clone)]
@@ -613,7 +618,6 @@ pub enum Statement {
     Branch(BranchStmt),
     Switch(SwitchStmt),
     Select(SelectStmt),
-    TypeSwitch(TypeSwitchStmt),
     Declaration(DeclStmt),
 }
 
@@ -734,9 +738,8 @@ impl Expression {
 impl TypeTerm {
     pub fn pos(&self) -> usize {
         match self {
-            Self::Single(typ) => typ.pos(),
-            Self::UnderLyingType(typ) => typ.pos,
             Self::Type(typ) => typ.pos(),
+            Self::UnderLyingType(typ) => typ.pos,
         }
     }
 }
@@ -834,9 +837,11 @@ impl Debug for Statement {
             Self::Assign(arg0) => f.debug_tuple("Assign").field(arg0).finish(),
             Self::Return(arg0) => f.debug_tuple("Return").field(arg0).finish(),
             Self::Branch(arg0) => f.debug_tuple("Branch").field(arg0).finish(),
-            Self::Switch(arg0) => f.debug_tuple("Switch").field(arg0).finish(),
+            Self::Switch(SwitchStmt::Expr(arg0)) => f.debug_tuple("Switch").field(arg0).finish(),
             Self::Select(arg0) => f.debug_tuple("Select").field(arg0).finish(),
-            Self::TypeSwitch(arg0) => f.debug_tuple("TypeSwitch").field(arg0).finish(),
+            Self::Switch(SwitchStmt::Type(arg0)) => {
+                f.debug_tuple("TypeSwitch").field(arg0).finish()
+            }
             Self::Declaration(arg0) => f.debug_tuple("Declaration").field(arg0).finish(),
         }
     }
