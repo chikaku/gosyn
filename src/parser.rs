@@ -2300,9 +2300,9 @@ impl Parser {
         self.expr_level = prev_level;
         let init = init.map(Box::new);
         let type_switch = self.is_type_switch(&tag)?;
-        let block = self.parse_case_block(type_switch)?;
 
         Ok(if type_switch {
+            let block = self.parse_type_case_block()?;
             let tag = tag.map(Box::new);
             ast::Statement::Switch(ast::SwitchStmt::Type(ast::TypeSwitchStmt {
                 pos,
@@ -2311,6 +2311,7 @@ impl Parser {
                 block,
             }))
         } else {
+            let block = self.parse_expr_case_block()?;
             let tag = match tag {
                 None => None,
                 Some(ast::Statement::Expr(s)) => Some(s.expr),
@@ -2326,28 +2327,42 @@ impl Parser {
         })
     }
 
-    fn parse_case_block(&mut self, type_assert: bool) -> Result<ast::CaseBlock> {
+    fn parse_expr_case_block(&mut self) -> Result<ast::CaseBlock<ast::ExprCaseClause>> {
         let mut body = vec![];
         let pos = self.expect(Operator::BraceLeft)?;
         while self.current_not(Operator::BraceRight) {
             let ((pos, tok), list) = match &self.current {
                 Some((_, Token::Keyword(Keyword::Case))) => (
                     (self.expect(Keyword::Case)?, Keyword::Case),
-                    match type_assert {
-                        true => self
-                            .parse_type_list()?
-                            .into_iter()
-                            .map(ast::Expression::Type)
-                            .collect(),
-                        false => self.expression_list()?,
-                    },
+                    self.expression_list()?,
                 ),
                 _ => ((self.expect(Keyword::Default)?, Keyword::Default), vec![]),
             };
 
             let pos = (pos, self.expect(Operator::Colon)?);
             let body_ = Box::new(self.parse_stmt_list()?);
-            body.push(ast::CaseClause { tok, pos, list, body: body_ });
+            body.push(ast::ExprCaseClause { tok, pos, list, body: body_ });
+        }
+
+        let pos = (pos, self.expect(Operator::BraceRight)?);
+        Ok(ast::CaseBlock { pos, body })
+    }
+
+    fn parse_type_case_block(&mut self) -> Result<ast::CaseBlock<ast::TypeCaseClause>> {
+        let mut body = vec![];
+        let pos = self.expect(Operator::BraceLeft)?;
+        while self.current_not(Operator::BraceRight) {
+            let ((pos, tok), list) = match &self.current {
+                Some((_, Token::Keyword(Keyword::Case))) => (
+                    (self.expect(Keyword::Case)?, Keyword::Case),
+                    self.parse_type_list()?,
+                ),
+                _ => ((self.expect(Keyword::Default)?, Keyword::Default), vec![]),
+            };
+
+            let pos = (pos, self.expect(Operator::Colon)?);
+            let body_ = Box::new(self.parse_stmt_list()?);
+            body.push(ast::TypeCaseClause { tok, pos, list, body: body_ });
         }
 
         let pos = (pos, self.expect(Operator::BraceRight)?);

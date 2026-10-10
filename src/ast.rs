@@ -501,18 +501,26 @@ pub struct ExprStmt {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct CaseClause {
+pub struct ExprCaseClause {
     pub tok: Keyword,
     pub pos: (usize, usize),
     pub list: Vec<Expression>,
     pub body: Box<Vec<Statement>>,
 }
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct TypeCaseClause {
+    pub tok: Keyword,
+    pub pos: (usize, usize),
+    pub list: Vec<Type>,
+    pub body: Box<Vec<Statement>>,
+}
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct CaseBlock {
+pub struct CaseBlock<T> {
     pub pos: (usize, usize),
-    pub body: Vec<CaseClause>,
+    pub body: Vec<T>,
 }
 
 #[derive(Debug, Clone)]
@@ -521,7 +529,7 @@ pub struct ExprSwitchStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
     pub tag: Option<Expression>,
-    pub block: CaseBlock,
+    pub block: CaseBlock<ExprCaseClause>,
 }
 
 #[derive(Debug, Clone)]
@@ -530,7 +538,7 @@ pub struct TypeSwitchStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
     pub tag: Option<Box<Statement>>,
-    pub block: CaseBlock,
+    pub block: CaseBlock<TypeCaseClause>,
 }
 
 #[derive(Debug, Clone)]
