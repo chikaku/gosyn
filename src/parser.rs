@@ -413,7 +413,7 @@ impl Parser {
 
         let name = self.identifier()?;
         let typ_params = if recv.is_none() && self.current_is(Operator::BarackLeft) {
-            self.parse_type_parameters()?.0
+            self.parse_type_parameters()?
         } else {
             Default::default()
         };
@@ -473,7 +473,7 @@ impl Parser {
         if !self.skipped(Operator::BarackLeft)? {
             let alias = self.skipped(Operator::Assign)?;
             let typ = self.type_()?;
-            let params = ast::FieldList::default();
+            let params = vec![];
             return Ok(ast::TypeSpec { docs, alias, name, typ, params });
         }
 
@@ -492,7 +492,7 @@ impl Parser {
                 let (pname, ptype) = extract(x, self.current_is(Operator::Comma));
                 if pname.is_some() && (ptype.is_some() || !self.current_is(Operator::BarackRight)) {
                     self.goback(start);
-                    let params = self.type_parameters()?;
+                    let params = self.parse_type_parameters()?;
                     let alias = self.skipped(Operator::Assign)?;
                     let typ = self.type_()?;
                     return Ok(ast::TypeSpec { docs, alias, name, typ, params });
@@ -505,7 +505,7 @@ impl Parser {
                 let arr = ast::ArrayType { pos: (pos0, pos1), len, typ };
                 let typ = ast::Type::Array(arr);
                 let alias = false;
-                let params = ast::FieldList::default();
+                let params = vec![];
                 Ok(ast::TypeSpec { docs, alias, name, typ, params })
             }
             TokenKind::Operator(Operator::BarackRight) => {
@@ -515,7 +515,7 @@ impl Parser {
                     typ: Box::new(self.type_()?),
                 };
                 let alias = false;
-                let params = ast::FieldList::default();
+                let params = vec![];
                 let typ = ast::Type::Slice(slice);
                 Ok(ast::TypeSpec { docs, alias, name, typ, params })
             }
@@ -527,7 +527,7 @@ impl Parser {
                 let arr = ast::ArrayType { pos: (pos0, pos1), len, typ };
                 let typ = ast::Type::Array(arr);
                 let alias = false;
-                let params = ast::FieldList::default();
+                let params = vec![];
                 Ok(ast::TypeSpec { docs, alias, name, typ, params })
             }
         }
@@ -709,30 +709,6 @@ impl Parser {
         }
     }
 
-    fn parse_type_parameters(&mut self) -> Result<(ast::FieldList, bool)> {
-        let mut fs = ast::FieldList::default();
-        let pos0 = self.expect(Operator::BarackLeft)?;
-        if self.current_is(Operator::BarackRight) {
-            return Err(self.else_error("type parameter list cannot be empty"));
-        }
-
-        let mut extra_comma = false;
-        while !self.current_is(Operator::BarackRight) {
-            fs.list.push(ast::Field {
-                name: self.identifier_list(None)?,
-                typ: self.parse_type_elem()?,
-                tag: None,
-                comments: Default::default(),
-            });
-
-            extra_comma = self.skipped(Operator::Comma)?;
-        }
-
-        let pos1 = self.expect(Operator::BarackRight)?;
-        fs.pos = Some((pos0, pos1));
-        Ok((fs, extra_comma))
-    }
-
     fn func_type(&mut self) -> Result<ast::FuncType> {
         // keep this position
         // caller should not consume the keyword
@@ -746,8 +722,7 @@ impl Parser {
         let params = self.check_parameters(params, true)?;
         let result = self.parse_result()?;
         let result = self.check_parameters(result, false)?;
-        let typ_params = ast::FieldList::default();
-
+        let typ_params = vec![];
         Ok(ast::FuncType { pos, typ_params, params, result })
     }
 
@@ -781,9 +756,6 @@ impl Parser {
                         | Token::Literal(LitKind::String, ..),
                     )) => {
                         let typ = self.qualified_ident(Some(name))?;
-                        let typ = ast::TypeElem {
-                            types: vec![ast::TypeTerm::Type(typ)],
-                        };
                         let tag = self.string_literal_or_none()?;
                         let comments = self.drain_comments();
                         Ok(ast::Field { name: vec![], typ, tag, comments })
@@ -792,20 +764,10 @@ impl Parser {
                         let mut name = self.identifier_list(Some(name))?;
 
                         let typ = if name.len() == 1 && self.current_is(Operator::BarackLeft) {
-                            let typ = self.array_or_typeargs(&mut name)?;
-                            if let ast::Type::Instantiated(typ) = typ {
-                                let tag = self.string_literal_or_none()?;
-                                let typ = ast::TypeElem {
-                                    types: vec![ast::TypeTerm::Type(ast::Type::Instantiated(typ))],
-                                };
-                                let comments = self.drain_comments();
-                                return Ok(ast::Field { name: vec![], typ, tag, comments });
-                            }
-                            ast::TypeTerm::Type(typ)
+                            self.array_or_typeargs(&mut name)?
                         } else {
-                            ast::TypeTerm::Type(self.type_()?)
+                            self.type_()?
                         };
-                        let typ = ast::TypeElem { types: vec![typ] };
                         let tag = self.string_literal_or_none()?;
                         let comments = self.drain_comments();
                         Ok(ast::Field { name, typ, tag, comments })
@@ -818,9 +780,7 @@ impl Parser {
                 let embedded_type = self.qualified_ident(None)?;
                 let embedded_type = Box::new(embedded_type);
                 let pointer_type = ast::PointerType { pos, typ: embedded_type };
-                let typ = ast::TypeElem {
-                    types: vec![ast::TypeTerm::Type(ast::Type::Pointer(pointer_type))],
-                };
+                let typ = ast::Type::Pointer(pointer_type);
                 let tag = self.string_literal_or_none()?;
                 let comments = self.drain_comments();
                 Ok(ast::Field { name: vec![], typ, tag, comments })
@@ -834,38 +794,31 @@ impl Parser {
     // InterfaceElem  = MethodElem | TypeElem .
     fn parse_interface_type(&mut self) -> Result<ast::InterfaceType> {
         let pos = self.expect(Keyword::Interface)?;
-        let pos1 = self.expect(Operator::BraceLeft)?;
-
-        let mut methods = ast::FieldList::default();
+        let _ = self.expect(Operator::BraceLeft);
+        let mut methods = vec![];
         while !self.current_is(Operator::BraceRight) {
             let start = self.preback();
             if self.current_is(LitKind::Ident) {
                 // try parse method name first
-                if let Ok(field) = self.parse_method_elem() {
-                    methods.list.push(field);
+                if let Ok(method) = self.parse_method_elem() {
+                    methods.push(ast::InterfaceElem::Method(method));
                     continue;
                 }
             }
 
             self.goback(start);
-            methods.list.push(ast::Field {
-                tag: None,
-                name: vec![],
-                typ: self.parse_type_elem()?,
-                comments: Default::default(),
-            });
+            methods.push(ast::InterfaceElem::Type(self.parse_type_elem()?));
             if !self.current_is(Operator::BraceRight) {
                 self.expect(Operator::SemiColon)?;
             }
         }
-
-        methods.pos = Some((pos1, self.expect(Operator::BraceRight)?));
-        Ok(ast::InterfaceType { pos, methods })
+        self.expect(Operator::BraceRight)?;
+        Ok(ast::InterfaceType { pos, elements: methods })
     }
 
     // MethodElem  = MethodName Signature .
     // MethodName  = identifier .
-    fn parse_method_elem(&mut self) -> Result<ast::Field> {
+    fn parse_method_elem(&mut self) -> Result<ast::MethodElem> {
         let id = self.identifier()?;
 
         let params = self.parameters()?;
@@ -882,14 +835,7 @@ impl Parser {
             self.expect(Operator::SemiColon)?;
         }
 
-        Ok(ast::Field {
-            tag: None,
-            name: vec![id],
-            typ: ast::TypeElem {
-                types: vec![ast::TypeTerm::Type(ast::Type::Function(func))],
-            },
-            comments: Default::default(),
-        })
+        Ok(ast::MethodElem { name: id, typ: func })
     }
 
     // TypeElem       = TypeTerm { "|" TypeTerm } .
@@ -897,9 +843,7 @@ impl Parser {
     // UnderlyingType = "~" Type .
     fn parse_type_elem(&mut self) -> Result<ast::TypeElem> {
         let mut terms = vec![self.parse_type_term()?];
-        while self.current_is(Operator::Or) {
-            let _pos = self.expect(Operator::Or)?;
-
+        while self.skipped(Operator::Or)? {
             terms.push(self.parse_type_term()?);
         }
 
@@ -910,12 +854,10 @@ impl Parser {
         let pos = self.current_pos();
         let under_type = self.skipped(Operator::Tiled)?;
         let typ = self.type_()?;
-        Ok(match under_type {
-            false => ast::TypeTerm::Type(typ),
-            true => {
-                let under_lying_type = ast::UnderLyingType { pos, typ: Box::new(typ) };
-                ast::TypeTerm::UnderLyingType(under_lying_type)
-            }
+        Ok(if under_type {
+            ast::TypeTerm::UnderLyingType(ast::UnderLyingType { pos, typ: Box::new(typ) })
+        } else {
+            ast::TypeTerm::Type(typ)
         })
     }
 
@@ -1408,196 +1350,26 @@ impl Parser {
         self.params_list(Operator::ParenLeft, Operator::ParenRight)
     }
 
-    fn type_parameters(&mut self) -> Result<ast::FieldList> {
-        self.field_list(Operator::BarackLeft, Operator::BarackRight)
-    }
-
-    fn field_list(&mut self, open: Operator, close: Operator) -> Result<ast::FieldList> {
+    /// TypeParamList = TypeParamDecl { "," TypeParamDecl } .
+    fn parse_type_parameters(&mut self) -> Result<Vec<ast::TypeParamDecl>> {
+        let open = Operator::BarackLeft;
+        let close = Operator::BarackRight;
         let pos0 = self.expect(open)?;
 
-        let mut list = vec![];
-        while !self.current_is(close) {
-            list.extend(self.parse_field_decl()?);
-            self.skipped(Operator::Comma)?; // extra comma
+        let mut list = vec![self.parse_type_param_decl()?];
+        while self.skipped(Operator::Comma)? && !self.current_is(close) {
+            list.push(self.parse_type_param_decl()?);
         }
 
-        let pos = Some((pos0, self.expect(close)?));
-        Ok(ast::FieldList { pos, list })
+        let _pos = Some((pos0, self.expect(close)?));
+        Ok(list)
     }
 
-    /// ParameterDecl = [ IdentifierList ] [ "..." ] Type .
-    fn parse_field_decl(&mut self) -> Result<Vec<ast::Field>> {
-        // Type
-        if self.current_not(LitKind::Ident) {
-            let typ = self.type_()?;
-            return Ok(vec![ast::Field {
-                name: vec![],
-                typ: ast::TypeElem {
-                    types: vec![ast::TypeTerm::Type(typ)],
-                },
-                tag: None,
-                comments: Default::default(),
-            }]);
-        }
-
-        let mut end_with_comma = false;
-        let mut id_list = vec![self.identifier()?];
-
-        loop {
-            match self.current_kind()? {
-                TokenKind::Operator(Operator::ParenRight) => {
-                    // Type1, Type2) | Type1, Type2,)
-                    return Ok(id_list
-                        .into_iter()
-                        .map(|id| ast::Field {
-                            name: vec![],
-                            typ: ast::TypeElem {
-                                types: vec![ast::TypeTerm::Type(ast::Type::Name(
-                                    ast::NameType::Ident(id),
-                                ))],
-                            },
-                            tag: None,
-                            comments: Default::default(),
-                        })
-                        .collect());
-                }
-                TokenKind::Operator(Operator::BarackLeft) => {
-                    if end_with_comma {
-                        // a, b, []
-                        let mut list = id_list
-                            .into_iter()
-                            .map(|id| ast::Field {
-                                name: vec![],
-                                typ: ast::TypeElem {
-                                    types: vec![ast::TypeTerm::Type(ast::Type::Name(
-                                        ast::NameType::Ident(id),
-                                    ))],
-                                },
-                                tag: None,
-                                comments: Default::default(),
-                            })
-                            .collect::<Vec<_>>();
-                        list.push(ast::Field {
-                            name: vec![],
-                            typ: ast::TypeElem {
-                                types: vec![ast::TypeTerm::Type(self.type_()?)],
-                            },
-                            tag: None,
-                            comments: Default::default(),
-                        });
-                        return Ok(list);
-                    }
-
-                    match self.array_or_typeargs(&mut id_list)? {
-                        ast::Type::Instantiated(typ) => {
-                            // Type1, Type2[Args]
-                            let typ = ast::Type::Instantiated(typ);
-
-                            let mut list = id_list
-                                .into_iter()
-                                .map(|id| ast::Field {
-                                    name: vec![],
-                                    typ: ast::TypeElem {
-                                        types: vec![ast::TypeTerm::Type(ast::Type::Name(
-                                            ast::NameType::Ident(id),
-                                        ))],
-                                    },
-                                    tag: None,
-                                    comments: Default::default(),
-                                })
-                                .collect::<Vec<_>>();
-                            list.push(ast::Field {
-                                name: vec![],
-                                typ: ast::TypeElem {
-                                    types: vec![ast::TypeTerm::Type(typ)],
-                                },
-                                tag: None,
-                                comments: Default::default(),
-                            });
-                            return Ok(list);
-                        }
-                        typ => {
-                            // a, b [N]T
-                            let name = id_list;
-                            return Ok(vec![ast::Field {
-                                name,
-                                typ: ast::TypeElem {
-                                    types: vec![ast::TypeTerm::Type(typ)],
-                                },
-                                tag: None,
-                                comments: Default::default(),
-                            }]);
-                        }
-                    }
-                }
-                TokenKind::Operator(Operator::Dot) => {
-                    if end_with_comma {
-                        return Err(self.else_error("unexpected '.' after ','"));
-                    }
-
-                    let pkg = id_list.pop();
-                    let typ = self.qualified_ident(pkg)?;
-                    let mut list = id_list
-                        .into_iter()
-                        .map(|id| ast::Field {
-                            name: vec![],
-                            typ: ast::TypeElem {
-                                types: vec![ast::TypeTerm::Type(ast::Type::Name(
-                                    ast::NameType::Ident(id),
-                                ))],
-                            },
-                            tag: None,
-                            comments: Default::default(),
-                        })
-                        .collect::<Vec<_>>();
-                    list.push(ast::Field {
-                        name: vec![],
-                        typ: ast::TypeElem {
-                            types: vec![ast::TypeTerm::Type(typ)],
-                        },
-                        tag: None,
-                        comments: Default::default(),
-                    });
-                    return Ok(list);
-                }
-                TokenKind::Operator(Operator::Comma) => {
-                    self.next()?;
-                    end_with_comma = true;
-                    if self.current_is(LitKind::Ident) {
-                        id_list.push(self.identifier()?);
-                        end_with_comma = false;
-                    }
-                }
-                _ => {
-                    if end_with_comma {
-                        // a, b, Type
-                        return Ok(id_list
-                            .into_iter()
-                            .map(|id| ast::Field {
-                                name: vec![],
-                                typ: ast::TypeElem {
-                                    types: vec![ast::TypeTerm::Type(ast::Type::Name(
-                                        ast::NameType::Ident(id),
-                                    ))],
-                                },
-                                tag: None,
-                                comments: Default::default(),
-                            })
-                            .collect::<Vec<_>>());
-                    }
-
-                    // a, b Type
-                    let typ = self.parse_type_elem()?;
-                    let name = id_list;
-                    return Ok(vec![ast::Field {
-                        name,
-                        typ,
-                        tag: None,
-                        comments: Default::default(),
-                    }]);
-                }
-            }
-        }
+    /// TypeParamDecl = IdentifierList Type .
+    fn parse_type_param_decl(&mut self) -> Result<ast::TypeParamDecl> {
+        let name = self.identifier_list(None)?;
+        let constraint = self.parse_type_elem()?;
+        Ok(ast::TypeParamDecl { name, constraint })
     }
 
     fn params_list(&mut self, open: Operator, close: Operator) -> Result<ast::Parameters> {
@@ -2678,7 +2450,9 @@ fn is_type_elem(expr: &ast::Expression) -> bool {
 
 #[cfg(test)]
 mod test {
-    use crate::ast::{self, Declaration, Expression, NameType, SwitchStmt, Type, TypeTerm};
+    use crate::ast::{
+        self, Declaration, Expression, InterfaceElem, NameType, SwitchStmt, Type, TypeTerm,
+    };
     use crate::parser::Parser;
     use crate::token::{Keyword, Operator};
 
@@ -2874,7 +2648,7 @@ mod test {
             finish(&mut parser)?;
 
             assert_eq!(func.recv.as_ref().map(|_| ()), none_recv);
-            assert_eq!(func.typ.typ_params.list.len(), type_params_len);
+            assert_eq!(func.typ.typ_params.len(), type_params_len);
 
             assert_eq!(func.typ.params.parameters.len(), params_len);
             assert_eq!(func.typ.result.parameters.len(), result_len);
@@ -3006,7 +2780,7 @@ mod test {
         };
         assert_eq!(alias.name.name, "Alias");
         assert!(alias.alias);
-        assert!(alias.params.list.is_empty());
+        assert!(alias.params.is_empty());
         match &alias.typ {
             Type::Name(NameType::Ident(ident)) => {
                 assert_eq!(ident.name, "Original")
@@ -3019,10 +2793,10 @@ mod test {
         };
         assert_eq!(set.name.name, "Set");
         assert!(set.alias);
-        assert_eq!(set.params.list.len(), 1);
-        assert_eq!(set.params.list[0].name.len(), 1);
-        assert_eq!(set.params.list[0].name[0].name, "P");
-        match &set.params.list[0].typ.types[..] {
+        assert_eq!(set.params.len(), 1);
+        assert_eq!(set.params[0].name.len(), 1);
+        assert_eq!(set.params[0].name[0].name, "P");
+        match &set.params[0].constraint.types[..] {
             [TypeTerm::Type(Type::Name(NameType::Ident(ident)))] => {
                 assert_eq!(ident.name, "comparable")
             }
@@ -3445,30 +3219,30 @@ mod test {
     #[test]
     fn parse_interface_with_type_union_and_method() -> Result<()> {
         let mut parser = new_started_parser("interface { ~T | ~U; Method() }");
-        let interface = parser.parse_interface_type()?;
+        let interface = parser.parse_interface_type().unwrap();
         finish(&mut parser)?;
 
-        let [type_element, method] = interface.methods.list.as_slice() else {
+        let [InterfaceElem::Type(type_element), InterfaceElem::Method(method)] =
+            interface.elements.as_slice()
+        else {
             return Err(anyhow::anyhow!("expected one type element and one method"));
         };
 
-        assert!(type_element.name.is_empty());
-        assert_eq!(type_element.typ.types.len(), 2);
-        let (left, right) = match &type_element.typ.types[..] {
-            [TypeTerm::UnderLyingType(left), TypeTerm::UnderLyingType(right)] => (left, right),
-            _ => panic!("Expected 2 Underlying types"),
+        assert_eq!(type_element.types.len(), 2);
+        let [TypeTerm::UnderLyingType(left), TypeTerm::UnderLyingType(right)] =
+            &type_element.types[..]
+        else {
+            panic!("Expected 2 Underlying types")
         };
 
         for (term, expected) in [(left, "T"), (right, "U")] {
             assert_ident_type(&term.typ, expected);
         }
 
-        assert_eq!(method.name.len(), 1);
-        assert_eq!(method.name[0].name, "Method");
-        assert!(matches!(
-            method.typ.types[0],
-            TypeTerm::Type(Type::Function(_))
-        ));
+        assert_eq!(method.name.name, "Method");
+        assert_eq!(method.typ.typ_params.len(), 0);
+        assert_eq!(method.typ.params.parameters.len(), 0);
+        assert_eq!(method.typ.result.parameters.len(), 0);
 
         Ok(())
     }
@@ -3520,20 +3294,16 @@ mod test {
         };
 
         assert!(struct_type.fields.iter().all(|field| field.name.is_empty()));
-        let plain_type = match &plain.typ.types[0] {
-            TypeTerm::Type(typ) => typ,
-            _ => panic!("Expected Expression"),
-        };
-        assert_ident_type(plain_type, "T");
+        assert_ident_type(&plain.typ, "T");
 
-        let pointer_type = match &pointer.typ.types[0] {
-            TypeTerm::Type(Type::Pointer(typ)) => &typ.typ,
+        let pointer_type = match &pointer.typ {
+            Type::Pointer(typ) => &typ.typ,
             _ => panic!("Got unexpected Underlying typ or expression"),
         };
         assert_ident_type(pointer_type, "U");
 
-        let qualified_type = match &qualified_pointer.typ.types[0] {
-            TypeTerm::Type(Type::Pointer(typ)) => &typ.typ,
+        let qualified_type = match &qualified_pointer.typ {
+            Type::Pointer(typ) => &typ.typ,
             _ => panic!("Got unexpected underlying type or Expression"),
         };
         match &**qualified_type {
@@ -3543,8 +3313,8 @@ mod test {
             }
             other => return Err(anyhow::anyhow!("expected qualified type, got {other:?}")),
         }
-        let generic_type = match &generic_pointer.typ.types[0] {
-            TypeTerm::Type(Type::Pointer(typ)) => &*typ.typ,
+        let generic_type = match &generic_pointer.typ {
+            Type::Pointer(typ) => &*typ.typ,
             _ => panic!("Got unexpected underlying type or Expression"),
         };
         match generic_type {
@@ -3574,9 +3344,8 @@ mod test {
         };
         assert_eq!(field.name.len(), 1);
         assert_eq!(field.name[0].name, "events");
-        assert_eq!(field.typ.types.len(), 1);
-        match &field.typ.types[0] {
-            TypeTerm::Type(Type::Channel(channel)) => {
+        match &field.typ {
+            Type::Channel(channel) => {
                 assert_eq!(channel.dir, Some(ast::ChanMode::Recv));
                 assert_ident_type(&channel.typ, "Event");
             }

@@ -61,16 +61,16 @@ pub struct MapType {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Field {
     pub name: Vec<Ident>,
-    pub typ: TypeElem,
+    pub typ: Type,
     pub tag: Option<StringLit>,
     pub comments: Vec<Rc<Comment>>,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct FieldList {
-    pub pos: Option<(usize, usize)>,
-    pub list: Vec<Field>,
+pub struct MethodElem {
+    pub name: Ident,
+    pub typ: FuncType,
 }
 
 #[derive(Debug, Clone)]
@@ -99,9 +99,16 @@ pub struct Parameters {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FuncType {
     pub pos: usize,
-    pub typ_params: FieldList,
+    pub typ_params: Vec<TypeParamDecl>,
     pub params: Parameters,
     pub result: Parameters,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct TypeParamDecl {
+    pub name: Vec<Ident>,
+    pub constraint: TypeElem,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -121,9 +128,16 @@ pub struct ChannelType {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum InterfaceElem {
+    Method(MethodElem),
+    Type(TypeElem),
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct InterfaceType {
     pub pos: usize,
-    pub methods: FieldList,
+    pub elements: Vec<InterfaceElem>,
 }
 
 #[derive(Debug, Clone)]
@@ -387,7 +401,7 @@ pub struct TypeSpec {
     pub docs: Vec<Rc<Comment>>,
     pub alias: bool,
     pub name: Ident,
-    pub params: FieldList,
+    pub params: Vec<TypeParamDecl>,
     pub typ: Type,
 }
 
@@ -680,24 +694,6 @@ impl TryFrom<Expression> for Type {
 impl AssignStmt {
     pub fn is_range(&self) -> bool {
         matches!(self.right.first(), Some(Expression::Range(_)))
-    }
-}
-
-impl FieldList {
-    pub fn pos(&self) -> usize {
-        if let Some((pos, _)) = self.pos {
-            return pos;
-        }
-
-        if let Some(field) = self.list.first() {
-            if let Some(name) = field.name.first() {
-                return name.pos;
-            }
-
-            return field.typ.pos();
-        }
-
-        panic!("call pos on empty FieldList");
     }
 }
 
