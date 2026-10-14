@@ -59,11 +59,32 @@ pub struct MapType {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Field {
-    pub name: Vec<Ident>,
-    pub typ: Type,
+pub struct FieldDecl {
+    pub field: Field,
     pub tag: Option<StringLit>,
     pub comments: Vec<Rc<Comment>>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Field {
+    Named(NamedField),
+    Embedded(EmbeddedField),
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct NamedField {
+    pub name: Vec<Ident>,
+    pub typ: Type,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct EmbeddedField {
+    pub pointer: Option<usize>,
+    pub typ: NameType,
+    pub type_args: Vec<Type>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,7 +98,7 @@ pub struct MethodElem {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct StructType {
     pub pos: (usize, usize),
-    pub fields: Vec<Field>,
+    pub fields: Vec<FieldDecl>,
 }
 
 #[derive(Debug, Clone)]

@@ -691,7 +691,14 @@ impl Parser {
                 // `_` is a regular identifier syntactically; rejection of `_`
                 // in non-binding type positions is the type checker's job.
                 // Matches go/parser.
-                Ok(Some(self.qualified_ident(None)?))
+                let typ = self.qualified_ident(None)?;
+                let typ = match self.current_is(Operator::BarackLeft) {
+                    false => ast::Type::Name(typ),
+                    // pkg.T[a, b, c]
+                    true => ast::Type::Instantiated(self.type_instance(typ)?),
+                };
+
+                Ok(Some(typ))
             }
 
             (pos0, Token::Operator(Operator::ParenLeft)) => {
@@ -745,7 +752,7 @@ impl Parser {
         Ok(ast::StructType { pos: (pos0, pos1), fields })
     }
 
-    fn field_decl(&mut self) -> Result<ast::Field> {
+    fn field_decl(&mut self) -> Result<ast::FieldDecl> {
         match &self.current {
             Some((_, Token::Literal(LitKind::Ident, _))) => {
                 let name = self.identifier()?;
@@ -756,34 +763,77 @@ impl Parser {
                         | Token::Literal(LitKind::String, ..),
                     )) => {
                         let typ = self.qualified_ident(Some(name))?;
+                        let type_args = match self.current_is(Operator::BarackLeft) {
+                            false => vec![],
+                            // pkg.T[a, b, c]
+                            true => self.type_arguments()?.0,
+                        };
+
                         let tag = self.string_literal_or_none()?;
                         let comments = self.drain_comments();
-                        Ok(ast::Field { name: vec![], typ, tag, comments })
+                        Ok(ast::FieldDecl {
+                            field: ast::Field::Embedded(ast::EmbeddedField {
+                                pointer: None,
+                                typ,
+                                type_args,
+                            }),
+                            tag,
+                            comments,
+                        })
                     }
                     _ => {
                         let mut name = self.identifier_list(Some(name))?;
 
-                        let typ = if name.len() == 1 && self.current_is(Operator::BarackLeft) {
-                            self.array_or_typeargs(&mut name)?
+                        let field = if name.len() == 1 && self.current_is(Operator::BarackLeft) {
+                            let typ = self.array_or_typeargs(&mut name)?;
+                            // Unnamed field
+                            if name.is_empty() {
+                                // We must unwrap types here
+                                // FIXME: Is there a nicer way to do this?
+                                // Why Is Go's syntax so ambiguous?
+                                match typ {
+                                    ast::Type::Instantiated(typ) => {
+                                        ast::Field::Embedded(ast::EmbeddedField {
+                                            pointer: None,
+                                            typ: typ.name,
+                                            type_args: typ.arguements,
+                                        })
+                                    }
+                                    // FIXME: No panicing
+                                    // Could return an `Err` but this situation means an assumtion is wrong in this code, and is not an issue with the code being parsed.
+                                    _ => panic!("Should not have any other type here"),
+                                }
+                            } else {
+                                ast::Field::Named(ast::NamedField { name, typ })
+                            }
                         } else {
-                            self.type_()?
+                            ast::Field::Named(ast::NamedField { name, typ: self.type_()? })
                         };
                         let tag = self.string_literal_or_none()?;
                         let comments = self.drain_comments();
-                        Ok(ast::Field { name, typ, tag, comments })
+                        Ok(ast::FieldDecl { field, tag, comments })
                     }
                 }
             }
 
             Some((_, Token::Operator(Operator::Star))) => {
                 let pos = self.expect(Operator::Star)?;
-                let embedded_type = self.qualified_ident(None)?;
-                let embedded_type = Box::new(embedded_type);
-                let pointer_type = ast::PointerType { pos, typ: embedded_type };
-                let typ = ast::Type::Pointer(pointer_type);
+                let typ = self.qualified_ident(None)?;
+                let type_args = match self.current_is(Operator::BarackLeft) {
+                    true => self.type_arguments()?.0,
+                    false => vec![],
+                };
                 let tag = self.string_literal_or_none()?;
                 let comments = self.drain_comments();
-                Ok(ast::Field { name: vec![], typ, tag, comments })
+                Ok(ast::FieldDecl {
+                    field: ast::Field::Embedded(ast::EmbeddedField {
+                        pointer: Some(pos),
+                        typ,
+                        type_args,
+                    }),
+                    tag,
+                    comments,
+                })
             }
 
             _ => Err(self.else_error("expect field name or embeded field")),
@@ -1517,6 +1567,17 @@ impl Parser {
 
                     let pkg = id_list.pop();
                     let typ = self.qualified_ident(pkg)?;
+                    let typ = match self.current_is(Operator::BarackLeft) {
+                        true => {
+                            let (arguments, pos) = self.type_arguments()?;
+                            ast::Type::Instantiated(ast::InstantiatedType {
+                                pos,
+                                name: typ,
+                                arguements: arguments,
+                            })
+                        }
+                        false => ast::Type::Name(typ),
+                    };
                     let mut list = id_list
                         .into_iter()
                         .map(|id| ast::ParameterSpec {
@@ -1643,7 +1704,7 @@ impl Parser {
     }
 
     // We return `ast::Type` here instead of `ast::NameType` as this also handles parsing instantiated types for qualified identifiers
-    fn qualified_ident(&mut self, name: Option<ast::Ident>) -> Result<ast::Type> {
+    fn qualified_ident(&mut self, name: Option<ast::Ident>) -> Result<ast::NameType> {
         let name = match name {
             Some(name) => name,
             None => self.identifier()?,
@@ -1651,7 +1712,7 @@ impl Parser {
 
         let pos = self.current_pos();
 
-        let ident = if self.skipped(Operator::Dot)? {
+        Ok(if self.skipped(Operator::Dot)? {
             let sel = self.identifier()?;
             ast::NameType::Qualified(ast::QualifiedName {
                 pos,
@@ -1660,16 +1721,15 @@ impl Parser {
             })
         } else {
             ast::NameType::Ident(name)
-        };
-
-        match self.current_is(Operator::BarackLeft) {
-            false => Ok(ast::Type::Name(ident)),
-            // pkg.T[a, b, c]
-            true => Ok(ast::Type::Instantiated(self.type_instance(ident)?)),
-        }
+        })
     }
 
     fn type_instance(&mut self, name: ast::NameType) -> Result<ast::InstantiatedType> {
+        let (arguments, pos) = self.type_arguments()?;
+        Ok(ast::InstantiatedType { pos, name, arguements: arguments })
+    }
+
+    fn type_arguments(&mut self) -> Result<(Vec<ast::Type>, (usize, usize))> {
         let pos0 = self.expect(Operator::BarackLeft)?;
         if self.current_is(Operator::BarackRight) {
             return Err(self.else_error("expect type argument list"));
@@ -1699,7 +1759,7 @@ impl Parser {
         };
         let pos = (pos0, self.expect(Operator::BarackRight)?);
 
-        Ok(ast::InstantiatedType { pos, name, arguements })
+        Ok((arguements, pos))
     }
 
     fn check_parameters(
@@ -2451,7 +2511,8 @@ fn is_type_elem(expr: &ast::Expression) -> bool {
 #[cfg(test)]
 mod test {
     use crate::ast::{
-        self, Declaration, Expression, InterfaceElem, NameType, SwitchStmt, Type, TypeTerm,
+        self, Declaration, Expression, Field, FieldDecl, InterfaceElem, NameType, SwitchStmt, Type,
+        TypeTerm,
     };
     use crate::parser::Parser;
     use crate::token::{Keyword, Operator};
@@ -3293,42 +3354,49 @@ mod test {
             return Err(anyhow::anyhow!("expected four struct fields"));
         };
 
-        assert!(struct_type.fields.iter().all(|field| field.name.is_empty()));
-        assert_ident_type(&plain.typ, "T");
-
-        let pointer_type = match &pointer.typ {
-            Type::Pointer(typ) => &typ.typ,
-            _ => panic!("Got unexpected Underlying typ or expression"),
+        assert!(struct_type
+            .fields
+            .iter()
+            .all(|field| matches!(field.field, Field::Embedded(_))));
+        match &plain.field {
+            Field::Embedded(plain) => assert_ident_type(&Type::Name(plain.typ.clone()), "T"),
+            _ => panic!("Got named field when expected embedded field"),
         };
-        assert_ident_type(pointer_type, "U");
 
-        let qualified_type = match &qualified_pointer.typ {
-            Type::Pointer(typ) => &typ.typ,
-            _ => panic!("Got unexpected underlying type or Expression"),
-        };
-        match &**qualified_type {
-            Type::Name(NameType::Qualified(typ)) => {
-                assert_eq!(&typ.package.name, "pkg");
-                assert_eq!(typ.identifier.name, "V");
+        match &pointer.field {
+            Field::Embedded(pointer) => {
+                assert!(pointer.pointer.is_some());
+                // Easier to wrap the type here and use existing functions then to unpack it all.
+                assert_ident_type(&Type::Name(pointer.typ.clone()), "U");
             }
-            other => return Err(anyhow::anyhow!("expected qualified type, got {other:?}")),
-        }
-        let generic_type = match &generic_pointer.typ {
-            Type::Pointer(typ) => &*typ.typ,
-            _ => panic!("Got unexpected underlying type or Expression"),
+            _ => panic!("Got named field when expected embedded pointer fielded"),
         };
-        match generic_type {
-            Type::Instantiated(typ) => {
-                match &typ.name {
-                    NameType::Ident(ident) => assert_eq!(&ident.name, "Box"),
-                    _ => panic!("Expected ident, got qualified name"),
-                };
-                assert_eq!(typ.arguements.len(), 1);
 
-                assert_ident_type(&typ.arguements[0], "int");
+        match &qualified_pointer.field {
+            Field::Embedded(qualified) => {
+                assert!(qualified.pointer.is_some());
+                match &qualified.typ {
+                    NameType::Qualified(typ) => {
+                        assert_eq!(&typ.package.name, "pkg");
+                        assert_eq!(typ.identifier.name, "V");
+                    }
+                    other => return Err(anyhow::anyhow!("expected qualified type, got {other:?}")),
+                }
             }
-            other => return Err(anyhow::anyhow!("expected generic type, got {other:?}")),
-        }
+            _ => panic!("Got named field when expected embedded qualified pointer field"),
+        };
+
+        let generic_type = match &generic_pointer.field {
+            Field::Embedded(field) => field,
+            _ => panic!("Got named field when expected embedded generic pointer field"),
+        };
+
+        match &generic_type.typ {
+            NameType::Ident(ident) => assert_eq!(&ident.name, "Box"),
+            _ => panic!("Expected ident, got qualified name"),
+        };
+        assert_eq!(generic_type.type_args.len(), 1);
+        assert_ident_type(&generic_type.type_args[0], "int");
 
         Ok(())
     }
@@ -3339,8 +3407,8 @@ mod test {
         let struct_type = parser.struct_type()?;
         finish(&mut parser)?;
 
-        let [field] = struct_type.fields.as_slice() else {
-            return Err(anyhow::anyhow!("expected one struct field"));
+        let [FieldDecl { field: Field::Named(field), .. }] = struct_type.fields.as_slice() else {
+            return Err(anyhow::anyhow!("expected one named struct field"));
         };
         assert_eq!(field.name.len(), 1);
         assert_eq!(field.name[0].name, "events");
