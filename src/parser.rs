@@ -796,7 +796,7 @@ impl Parser {
                                         ast::Field::Embedded(ast::EmbeddedField {
                                             pointer: None,
                                             typ: typ.name,
-                                            type_args: typ.arguements,
+                                            type_args: typ.arguments,
                                         })
                                     }
                                     // FIXME: No panicing
@@ -1578,7 +1578,7 @@ impl Parser {
                             ast::Type::Instantiated(ast::InstantiatedType {
                                 pos,
                                 name: typ,
-                                arguements: arguments,
+                                arguments,
                             })
                         }
                         false => ast::Type::Name(typ),
@@ -1640,7 +1640,7 @@ impl Parser {
     /// if list length greater than 1 then it must be type args
     /// if list have extra comma then it must be type args
     /// While theoretically the remaining type could be an index expression, this function is only ever called in type parsing contexts so will not be.
-    /// If it does parse type arguements then the last item in the identifiers Vec will be removed and used for the name of the instantiated type.
+    /// If it does parse type arguments then the last item in the identifiers Vec will be removed and used for the name of the instantiated type.
     fn array_or_typeargs(&mut self, identifiers: &mut Vec<ast::Ident>) -> Result<ast::Type> {
         let start = self.preback();
 
@@ -1690,7 +1690,7 @@ impl Parser {
         let Some(name) = identifiers.pop() else {
             return Err(self.else_error_at(
                 pos0,
-                "Unexpected type arguements without a type to instantiate",
+                "Unexpected type arguments without a type to instantiate",
             ));
         };
 
@@ -1702,7 +1702,7 @@ impl Parser {
         Ok(ast::Type::Instantiated(ast::InstantiatedType {
             pos,
             name,
-            arguements: types,
+            arguments: types,
         }))
     }
 
@@ -1729,7 +1729,7 @@ impl Parser {
 
     fn type_instance(&mut self, name: ast::NameType) -> Result<ast::InstantiatedType> {
         let (arguments, pos) = self.type_arguments()?;
-        Ok(ast::InstantiatedType { pos, name, arguements: arguments })
+        Ok(ast::InstantiatedType { pos, name, arguments })
     }
 
     fn type_arguments(&mut self) -> Result<(Vec<ast::Type>, (usize, usize))> {
@@ -1738,7 +1738,7 @@ impl Parser {
             return Err(self.else_error("expect type argument list"));
         }
 
-        let (arguements, _) = {
+        let (arguments, _) = {
             self.inc_expr_level()?;
             let expr = self.type_()?;
 
@@ -1762,7 +1762,7 @@ impl Parser {
         };
         let pos = (pos0, self.expect(Operator::BarackRight)?);
 
-        Ok((arguements, pos))
+        Ok((arguments, pos))
     }
 
     fn check_parameters(
@@ -4225,9 +4225,9 @@ test-abc[bcd]
         };
 
         match argument("func f(Box[*int]) {}")? {
-            Type::Instantiated(InstantiatedType { name, arguements, .. }) => {
+            Type::Instantiated(InstantiatedType { name, arguments, .. }) => {
                 assert_ident_type(&Type::Name(name.clone()), "Box");
-                match arguements.as_slice() {
+                match arguments.as_slice() {
                     [Type::Pointer(pointer)] => assert_ident_type(&pointer.typ, "int"),
                     _ => panic!("Expected pointer in type argument"),
                 };
@@ -4236,9 +4236,9 @@ test-abc[bcd]
         };
 
         match argument("func f(Box[time.Time]) {}")? {
-            Type::Instantiated(InstantiatedType { name, arguements, .. }) => {
+            Type::Instantiated(InstantiatedType { name, arguments, .. }) => {
                 assert_ident_type(&Type::Name(name.clone()), "Box");
-                match arguements.as_slice() {
+                match arguments.as_slice() {
                     [arg] => match arg {
                         Type::Name(NameType::Qualified(qual)) => {
                             assert_eq!(qual.package.name, "time");
@@ -4253,9 +4253,9 @@ test-abc[bcd]
         };
 
         match argument("func f(Box[(int)]) {}")? {
-            Type::Instantiated(InstantiatedType { name, arguements, .. }) => {
+            Type::Instantiated(InstantiatedType { name, arguments, .. }) => {
                 assert_ident_type(&Type::Name(name.clone()), "Box");
-                match arguements.as_slice() {
+                match arguments.as_slice() {
                     [Type::Paren(ParenType { typ, .. })] => match &**typ {
                         Type::Name(NameType::Ident(ident)) => {
                             assert_eq!(ident.name, "int")
@@ -4269,13 +4269,13 @@ test-abc[bcd]
         };
 
         match argument("func f(Box[Box[int]]) {}")? {
-            Type::Instantiated(InstantiatedType { name, arguements, .. }) => {
+            Type::Instantiated(InstantiatedType { name, arguments, .. }) => {
                 assert_ident_type(&Type::Name(name.clone()), "Box");
-                match arguements.as_slice() {
-                    [Type::Instantiated(InstantiatedType { name, arguements, .. })] => {
+                match arguments.as_slice() {
+                    [Type::Instantiated(InstantiatedType { name, arguments, .. })] => {
                         assert_ident_type(&Type::Name(name.clone()), "Box");
-                        assert_eq!(arguements.len(), 1);
-                        assert_ident_type(&arguements[0], "int");
+                        assert_eq!(arguments.len(), 1);
+                        assert_ident_type(&arguments[0], "int");
                     }
                     _ => panic!("Expected a single parenthisised  type argument"),
                 };

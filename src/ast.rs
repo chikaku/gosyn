@@ -181,7 +181,7 @@ pub enum NameType {
 pub struct InstantiatedType {
     pub pos: (usize, usize),
     pub name: NameType,
-    pub arguements: Vec<Type>,
+    pub arguments: Vec<Type>,
 }
 
 #[derive(Debug, Clone)]
