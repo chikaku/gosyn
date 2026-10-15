@@ -711,6 +711,10 @@ impl TryFrom<Expression> for Type {
                 pos: pointer.pos,
                 typ: Box::new(Type::try_from(*pointer.right)?),
             }),
+            Expression::Paren(ParenExpression { pos, expr }) => Type::Paren(ParenType {
+                pos,
+                typ: Box::new(Type::try_from(*expr)?),
+            }),
             other => Err(format!("Cannot convert {other:?} to Type"))?,
         })
     }
