@@ -983,8 +983,7 @@ impl Parser {
             Some((
                 pos,
                 Token::Operator(
-                    op @ (Operator::Star
-                    | Operator::Add
+                    op @ (Operator::Add
                     | Operator::Sub
                     | Operator::Not
                     | Operator::Xor
@@ -995,6 +994,12 @@ impl Parser {
                 let x = Box::new(self.unray_expression()?);
                 let opt = ast::Operation { pos, op, x, y: None };
                 Ok(ast::Expression::Operation(opt))
+            }
+
+            Some((pos, Token::Operator(Operator::Star))) => {
+                self.next()?;
+                let right = Box::new(self.unray_expression()?);
+                Ok(ast::Expression::Star(ast::StarExpression { pos, right }))
             }
 
             Some((pos, Token::Operator(op @ Operator::And))) => {
@@ -2511,8 +2516,8 @@ fn is_type_elem(expr: &ast::Expression) -> bool {
 #[cfg(test)]
 mod test {
     use crate::ast::{
-        self, Declaration, Expression, Field, FieldDecl, InterfaceElem, NameType, SwitchStmt, Type,
-        TypeTerm,
+        self, Declaration, Expression, Field, FieldDecl, InstantiatedType, InterfaceElem, NameType,
+        SwitchStmt, Type, TypeTerm,
     };
     use crate::parser::Parser;
     use crate::token::{Keyword, Operator};
@@ -2997,7 +3002,7 @@ mod test {
     }
 
     #[test]
-    fn parse_all_expression_operators() -> Result<()> {
+    fn parse_all_expression_operators_not_unary_star() -> Result<()> {
         let binary = [
             ("+", Operator::Add),
             ("-", Operator::Sub),
@@ -3030,7 +3035,6 @@ mod test {
         for (source, expected) in [
             ("+value", Operator::Add),
             ("-value", Operator::Sub),
-            ("*value", Operator::Star),
             ("!value", Operator::Not),
             ("^value", Operator::Xor),
             ("&value", Operator::And),
@@ -3045,6 +3049,19 @@ mod test {
                 other => return Err(anyhow::anyhow!("unexpected AST for {source}: {other:?}")),
             }
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_pointer_expressions() -> Result<()> {
+        let source = "*value";
+        match parse_expression_complete(source)? {
+            Expression::Star(pointer) => {
+                assert_ident(&pointer.right, "value");
+            }
+            other => return Err(anyhow::anyhow!("unexpected AST for {source}: {other:?}")),
+        };
 
         Ok(())
     }
@@ -3312,8 +3329,8 @@ mod test {
     fn reject_interface_with_missing_opening_brace() -> Result<()> {
         let mut parser = new_started_parser("interface int }");
         let interface = parser.parse_interface_type();
-        assert!(interface.is_err());
         finish(&mut parser)?;
+        assert!(interface.is_err());
         Ok(())
     }
 
@@ -4193,6 +4210,30 @@ test-abc[bcd]
                 .parse_file()
                 .map_err(|e| anyhow::anyhow!("failed to parse {src:?}: {e}"))?;
         }
+        Ok(())
+    }
+
+    #[test]
+    fn parse_pointer_type_arguments() -> Result<()> {
+        let mut parser = new_started_parser("func f(Box[*int]) {}");
+        let func = parser.parse_func_decl()?;
+        finish(&mut parser)?;
+        match func.typ.params.parameters.as_slice() {
+            [param] => {
+                assert_eq!(param.identifiers.len(), 0);
+                match &param.typ {
+                    Type::Instantiated(InstantiatedType {  name, arguements,.. }) => {
+                        assert_ident_type(&Type::Name(name.clone()), "Box");
+                        match arguements.as_slice() {
+[                            Type::Pointer(pointer)] => assert_ident_type(&pointer.typ,"int"),
+                            _ => panic!("Expected pointer in type argument"),
+                        };
+                    }
+                    _ => panic!("Expected InstantiatedType with pointer type argument"),
+                };
+            }
+            _ => panic!("Got unexpected number of params when an unnamed type instantiation was used as the only param")
+        };
         Ok(())
     }
 }
