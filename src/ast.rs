@@ -775,7 +775,7 @@ impl Type {
             Type::Interface(x) => x.pos,
             Type::Name(name_type) => match name_type {
                 NameType::Ident(ident) => ident.pos,
-                NameType::Qualified(qualified_ident) => qualified_ident.pos,
+                NameType::Qualified(qualified_ident) => qualified_ident.package.pos,
             },
             Type::Instantiated(instantiated_type) => instantiated_type.pos.0,
             Type::Paren(paren_type) => paren_type.pos.0,
