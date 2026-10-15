@@ -704,11 +704,15 @@ impl From<BasicLit> for StringLit {
 impl TryFrom<Expression> for Type {
     type Error = String;
     fn try_from(exp: Expression) -> Result<Self, Self::Error> {
-        match exp {
-            Expression::Type(typ) => Ok(typ),
-            Expression::Ident(ident) => Ok(Type::Name(NameType::Ident(ident))),
-            other => Err(format!("Cannot convert {other:?} to Type")),
-        }
+        Ok(match exp {
+            Expression::Type(typ) => typ,
+            Expression::Ident(ident) => Type::Name(NameType::Ident(ident)),
+            Expression::Star(pointer) => Type::Pointer(PointerType {
+                pos: pointer.pos,
+                typ: Box::new(Type::try_from(*pointer.right)?),
+            }),
+            other => Err(format!("Cannot convert {other:?} to Type"))?,
+        })
     }
 }
 
