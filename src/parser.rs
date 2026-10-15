@@ -1642,6 +1642,8 @@ impl Parser {
     /// While theoretically the remaining type could be an index expression, this function is only ever called in type parsing contexts so will not be.
     /// If it does parse type arguements then the last item in the identifiers Vec will be removed and used for the name of the instantiated type.
     fn array_or_typeargs(&mut self, identifiers: &mut Vec<ast::Ident>) -> Result<ast::Type> {
+        let start = self.preback();
+
         let pos0 = self.expect(Operator::BarackLeft)?;
         if self.current_is(Operator::BarackRight) {
             let pos = (pos0, self.expect(Operator::BarackRight)?);
@@ -1650,7 +1652,7 @@ impl Parser {
             return Ok(ast::Type::Slice(slice));
         }
 
-        let (expr, mut types, comma) = {
+        let (expr, _types, comma) = {
             self.inc_expr_level()?;
             let expr = self.expression()?;
             let mut list = vec![];
@@ -1692,18 +1694,14 @@ impl Parser {
             ));
         };
 
-        let first_type = ast::Type::try_from(expr).map_err(|e| {
-            self.else_error_at(
-                pos0,
-                format!(
-                    "expression in type instantiation, or Expression to Type is missing cases: {e}"
-                ),
-            )
-        })?;
-        types.insert(0, first_type);
+        // Easier to start again rather then convert an expression into a type
+        self.goback(start);
+
+        let (types, pos) = self.type_arguments()?;
+        let name = ast::NameType::Ident(name);
         Ok(ast::Type::Instantiated(ast::InstantiatedType {
-            pos: (pos0, pos1),
-            name: ast::NameType::Ident(name),
+            pos,
+            name,
             arguements: types,
         }))
     }
@@ -2517,7 +2515,7 @@ fn is_type_elem(expr: &ast::Expression) -> bool {
 mod test {
     use crate::ast::{
         self, Declaration, Expression, Field, FieldDecl, InstantiatedType, InterfaceElem, NameType,
-        SwitchStmt, Type, TypeTerm,
+        ParenType, PointerType, SwitchStmt, Type, TypeTerm,
     };
     use crate::parser::Parser;
     use crate::token::{Keyword, Operator};
@@ -4214,26 +4212,102 @@ test-abc[bcd]
     }
 
     #[test]
-    fn parse_pointer_type_arguments() -> Result<()> {
-        let mut parser = new_started_parser("func f(Box[*int]) {}");
-        let func = parser.parse_func_decl()?;
-        finish(&mut parser)?;
-        match func.typ.params.parameters.as_slice() {
-            [param] => {
-                assert_eq!(param.identifiers.len(), 0);
-                match &param.typ {
-                    Type::Instantiated(InstantiatedType {  name, arguements,.. }) => {
-                        assert_ident_type(&Type::Name(name.clone()), "Box");
-                        match arguements.as_slice() {
-[                            Type::Pointer(pointer)] => assert_ident_type(&pointer.typ,"int"),
-                            _ => panic!("Expected pointer in type argument"),
-                        };
-                    }
-                    _ => panic!("Expected InstantiatedType with pointer type argument"),
+    fn parse_complex_type_arguments() -> Result<()> {
+        let argument = |s| {
+            let mut parser = new_started_parser(s);
+            let func = parser.parse_func_decl()?;
+            finish(&mut parser)?;
+
+            assert_eq!(func.typ.params.parameters.len(), 1);
+            let param = func.typ.params.parameters[0].clone();
+            assert_eq!(param.identifiers.len(), 0);
+            Ok(param.typ)
+        };
+
+        match argument("func f(Box[*int]) {}")? {
+            Type::Instantiated(InstantiatedType { name, arguements, .. }) => {
+                assert_ident_type(&Type::Name(name.clone()), "Box");
+                match arguements.as_slice() {
+                    [Type::Pointer(pointer)] => assert_ident_type(&pointer.typ, "int"),
+                    _ => panic!("Expected pointer in type argument"),
                 };
             }
-            _ => panic!("Got unexpected number of params when an unnamed type instantiation was used as the only param")
+            _ => panic!("Expected InstantiatedType with pointer type argument"),
         };
+
+        match argument("func f(Box[time.Time]) {}")? {
+            Type::Instantiated(InstantiatedType { name, arguements, .. }) => {
+                assert_ident_type(&Type::Name(name.clone()), "Box");
+                match arguements.as_slice() {
+                    [arg] => match arg {
+                        Type::Name(NameType::Qualified(qual)) => {
+                            assert_eq!(qual.package.name, "time");
+                            assert_eq!(qual.identifier.name, "Time");
+                        }
+                        _ => panic!("Got unqualified name when expected qualified name"),
+                    },
+                    _ => panic!("Got mor or less type arguments then expected"),
+                };
+            }
+            _ => panic!("Expected InstantiatedType with qualified type argument"),
+        };
+
+        match argument("func f(Box[(int)]) {}")? {
+            Type::Instantiated(InstantiatedType { name, arguements, .. }) => {
+                assert_ident_type(&Type::Name(name.clone()), "Box");
+                match arguements.as_slice() {
+                    [Type::Paren(ParenType { typ, .. })] => match &**typ {
+                        Type::Name(NameType::Ident(ident)) => {
+                            assert_eq!(ident.name, "int")
+                        }
+                        _ => panic!("Got unqualified name when expected qualified name"),
+                    },
+                    _ => panic!("Expected a single parenthisised  type argument"),
+                };
+            }
+            _ => panic!("Expected InstantiatedType with paren type argument"),
+        };
+
+        match argument("func f(Box[Box[int]]) {}")? {
+            Type::Instantiated(InstantiatedType { name, arguements, .. }) => {
+                assert_ident_type(&Type::Name(name.clone()), "Box");
+                match arguements.as_slice() {
+                    [Type::Instantiated(InstantiatedType { name, arguements, .. })] => {
+                        assert_ident_type(&Type::Name(name.clone()), "Box");
+                        assert_eq!(arguements.len(), 1);
+                        assert_ident_type(&arguements[0], "int");
+                    }
+                    _ => panic!("Expected a single parenthisised  type argument"),
+                };
+            }
+            _ => panic!("Expected InstantiatedType with paren type argument"),
+        };
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_pointer_type_arguments_in_embedded_field() -> Result<()> {
+        let mut parser = new_started_parser("struct { Box[*int] }");
+        let struct_type = parser.struct_type()?;
+
+        match struct_type.fields.as_slice() {
+            [FieldDecl {
+                field: Field::Embedded(field), ..
+            }] => {
+                assert!(field.pointer.is_none());
+                assert_ident_type(&Type::Name(field.typ.clone()), "Box");
+
+                match field.type_args.as_slice() {
+                    [Type::Pointer(PointerType { typ, .. })] => assert_ident_type(typ, "int"),
+                    _ => {
+                        panic!("Got more or less type args then expected or a non-pointer type arg")
+                    }
+                }
+            }
+            _ => panic!("unexpected number of fields or got incorrect non embedded field"),
+        };
+
         Ok(())
     }
 }

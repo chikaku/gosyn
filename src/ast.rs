@@ -699,27 +699,6 @@ impl From<BasicLit> for StringLit {
     }
 }
 
-// This implementation is currently only used for parsing the ambiguous case of type instantiations vs arrays.
-// FIXME: This implementation needs to be filled out properly as there are many cases missing
-impl TryFrom<Expression> for Type {
-    type Error = String;
-    fn try_from(exp: Expression) -> Result<Self, Self::Error> {
-        Ok(match exp {
-            Expression::Type(typ) => typ,
-            Expression::Ident(ident) => Type::Name(NameType::Ident(ident)),
-            Expression::Star(pointer) => Type::Pointer(PointerType {
-                pos: pointer.pos,
-                typ: Box::new(Type::try_from(*pointer.right)?),
-            }),
-            Expression::Paren(ParenExpression { pos, expr }) => Type::Paren(ParenType {
-                pos,
-                typ: Box::new(Type::try_from(*expr)?),
-            }),
-            other => Err(format!("Cannot convert {other:?} to Type"))?,
-        })
-    }
-}
-
 impl AssignStmt {
     pub fn is_range(&self) -> bool {
         matches!(self.right.first(), Some(Expression::Range(_)))
