@@ -844,7 +844,7 @@ impl Parser {
     // InterfaceElem  = MethodElem | TypeElem .
     fn parse_interface_type(&mut self) -> Result<ast::InterfaceType> {
         let pos = self.expect(Keyword::Interface)?;
-        let _ = self.expect(Operator::BraceLeft);
+        let _ = self.expect(Operator::BraceLeft)?;
         let mut methods = vec![];
         while !self.current_is(Operator::BraceRight) {
             let start = self.preback();
@@ -3305,6 +3305,15 @@ mod test {
         assert_eq!(method.typ.params.parameters.len(), 0);
         assert_eq!(method.typ.result.parameters.len(), 0);
 
+        Ok(())
+    }
+
+    #[test]
+    fn reject_interface_with_missing_opening_brace() -> Result<()> {
+        let mut parser = new_started_parser("interface int }");
+        let interface = parser.parse_interface_type();
+        assert!(interface.is_err());
+        finish(&mut parser)?;
         Ok(())
     }
 
