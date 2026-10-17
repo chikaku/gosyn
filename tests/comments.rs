@@ -207,6 +207,54 @@ fn comments_crossing_parser_backtracking_do_not_leak() {
 }
 
 #[test]
+fn records_type_argument_comments_once() {
+    for declaration in [
+        "func f(Box[/* argument */ int]) {}",
+        "func f(x Box[/* argument */ int]) {}",
+        "type S struct { Box[/* argument */ int] }",
+        "type S struct { *Box[/* argument */ int] }",
+        "type S struct { pkg.Box[/* argument */ int] }",
+    ] {
+        let source = format!("package p\n{declaration}\n");
+        let file = parse_source(&source).unwrap();
+        assert_eq!(
+            comment_texts(&file.comments),
+            ["/* argument */"],
+            "{source}"
+        );
+
+        if let Declaration::Type(types) = &file.decl[0] {
+            let Expression::TypeStruct(struct_type) = &types.specs[0].typ else {
+                panic!("expected a struct type: {source}");
+            };
+            assert_eq!(
+                comment_texts(&struct_type.fields[0].comments),
+                ["/* argument */"],
+                "{source}"
+            );
+        }
+    }
+}
+
+#[test]
+fn records_nested_function_type_argument_comments_once() {
+    for depth in [4, 8, 12, 16] {
+        let mut typ = "int /* argument */".to_string();
+        for _ in 0..depth {
+            typ = format!("Box[func({typ})]");
+        }
+        let source = format!("package p\ntype Box[T any] struct{{}}\nfunc f({typ}) {{}}\n");
+        let file = parse_source(&source).unwrap();
+
+        assert_eq!(
+            comment_texts(&file.comments),
+            ["/* argument */"],
+            "depth {depth}"
+        );
+    }
+}
+
+#[test]
 fn parses_long_unicode_comment_before_many_same_line_tokens() {
     const STATEMENT_COUNT: usize = 200;
 
