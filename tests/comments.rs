@@ -224,7 +224,7 @@ fn records_type_argument_comments_once() {
         );
 
         if let Declaration::Type(types) = &file.decl[0] {
-            let Expression::TypeStruct(struct_type) = &types.specs[0].typ else {
+            let Type::Struct(struct_type) = &types.specs[0].typ else {
                 panic!("expected a struct type: {source}");
             };
             assert_eq!(

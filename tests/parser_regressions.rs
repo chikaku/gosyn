@@ -1,4 +1,4 @@
-use gosyn::ast::{Declaration, Expression};
+use gosyn::ast::{Declaration, NameType, Type, TypeTerm};
 use gosyn::{parse_source, Error};
 
 #[test]
@@ -66,10 +66,10 @@ fn preserves_generic_structs_with_pointer_constraints() {
         };
         let spec = &types.specs[0];
 
-        assert_eq!(spec.params.list.len(), 1, "{source}");
-        assert_eq!(spec.params.list[0].name.len(), 1, "{source}");
-        assert_eq!(spec.params.list[0].name[0].name, "P", "{source}");
-        assert!(matches!(spec.typ, Expression::TypeStruct(_)), "{source}");
+        assert_eq!(spec.params.len(), 1, "{source}");
+        assert_eq!(spec.params[0].name.len(), 1, "{source}");
+        assert_eq!(spec.params[0].name[0].name, "P", "{source}");
+        assert!(matches!(spec.typ, Type::Struct(_)), "{source}");
     }
 }
 
@@ -79,16 +79,18 @@ fn preserves_pointer_constraint_ast() {
     let Declaration::Type(types) = &file.decl[0] else {
         panic!("expected a type declaration");
     };
-    let Expression::TypePointer(outer) = &types.specs[0].params.list[0].typ else {
+    let [TypeTerm::Type(Type::Pointer(outer))] =
+        types.specs[0].params[0].constraint.types.as_slice()
+    else {
         panic!("expected an outer pointer constraint");
     };
-    let Expression::TypePointer(inner) = outer.typ.as_ref() else {
+    let Type::Pointer(inner) = outer.typ.as_ref() else {
         panic!("expected an inner pointer constraint");
     };
-    let Expression::TypeSlice(slice) = inner.typ.as_ref() else {
+    let Type::Slice(slice) = inner.typ.as_ref() else {
         panic!("expected a pointer to a slice");
     };
-    let Expression::Ident(element) = slice.typ.as_ref() else {
+    let Type::Name(NameType::Ident(element)) = slice.typ.as_ref() else {
         panic!("expected a named slice element type");
     };
 
@@ -102,29 +104,29 @@ fn preserves_nested_function_type_argument_ast() {
     let Declaration::Function(function) = &file.decl[1] else {
         panic!("expected a function declaration");
     };
-    assert_eq!(function.typ.params.list.len(), 1);
-    assert!(function.typ.params.list[0].name.is_empty());
+    assert_eq!(function.typ.params.parameters.len(), 1);
+    assert!(function.typ.params.parameters[0].identifiers.is_empty());
 
-    let mut typ = &function.typ.params.list[0].typ;
+    let mut typ = &function.typ.params.parameters[0].typ;
     for _ in 0..2 {
-        let Expression::Index(instantiation) = typ else {
+        let Type::Instantiated(instantiation) = typ else {
             panic!("expected an instantiated type, got {typ:?}");
         };
-        let Expression::Ident(name) = instantiation.left.as_ref() else {
+        let NameType::Ident(name) = &instantiation.name else {
             panic!("expected a named generic type");
         };
         assert_eq!(name.name, "Box");
 
-        let Expression::TypeFunction(function) = instantiation.index.as_ref() else {
+        let [Type::Function(function)] = instantiation.arguments.as_slice() else {
             panic!("expected a function type argument");
         };
-        assert_eq!(function.params.list.len(), 1);
-        assert!(function.params.list[0].name.is_empty());
-        assert!(function.result.list.is_empty());
-        typ = &function.params.list[0].typ;
+        assert_eq!(function.params.parameters.len(), 1);
+        assert!(function.params.parameters[0].identifiers.is_empty());
+        assert!(function.result.parameters.is_empty());
+        typ = &function.params.parameters[0].typ;
     }
 
-    let Expression::Ident(parameter) = typ else {
+    let Type::Name(NameType::Ident(parameter)) = typ else {
         panic!("expected a named function parameter type");
     };
     assert_eq!(parameter.name, "int");
@@ -140,8 +142,8 @@ fn preserves_array_declarations_that_resemble_type_parameters() {
         };
         let spec = &types.specs[0];
 
-        assert!(spec.params.list.is_empty(), "{source}");
-        assert!(matches!(spec.typ, Expression::TypeArray(_)), "{source}");
+        assert!(spec.params.is_empty(), "{source}");
+        assert!(matches!(spec.typ, Type::Array(_)), "{source}");
     }
 }
 
@@ -153,14 +155,14 @@ fn trailing_comma_disambiguates_type_parameters_from_array_lengths() {
         panic!("expected two type declarations");
     };
     let array = &array.specs[0];
-    assert!(array.params.list.is_empty());
-    assert!(matches!(array.typ, Expression::TypeArray(_)));
+    assert!(array.params.is_empty());
+    assert!(matches!(array.typ, Type::Array(_)));
 
     let generic = &generic.specs[0];
-    assert_eq!(generic.params.list.len(), 1);
-    assert_eq!(generic.params.list[0].name.len(), 1);
-    assert_eq!(generic.params.list[0].name[0].name, "P");
-    let Expression::Ident(typ) = &generic.typ else {
+    assert_eq!(generic.params.len(), 1);
+    assert_eq!(generic.params[0].name.len(), 1);
+    assert_eq!(generic.params[0].name[0].name, "P");
+    let Type::Name(NameType::Ident(typ)) = &generic.typ else {
         panic!("expected a named underlying type");
     };
     assert_eq!(typ.name, "int");
