@@ -156,12 +156,12 @@ impl Parser {
         self.current = self.scan_next().unwrap();
     }
 
-    fn try_parse<R, F>(&mut self, f: F) -> Option<R>
+    fn try_parse<R, F>(&mut self, f: F) -> Option<Result<R>>
     where
-        F: Fn() -> Result<R>,
+        F: Fn() -> Option<Result<R>>,
     {
         let prev_state = self.clone();
-        let res = f().ok();
+        let res = f();
         if res.is_none() {
             *self = prev_state;
         }
