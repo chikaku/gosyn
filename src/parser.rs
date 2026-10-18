@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use anyhow::Result;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Parser {
     scan: Scanner,
 
@@ -154,6 +154,18 @@ impl Parser {
     fn goback(&mut self, prev: (usize, bool)) {
         self.scan.goback(prev);
         self.current = self.scan_next().unwrap();
+    }
+
+    fn try_parse<R, F>(&mut self, f: F) -> Option<R>
+    where
+        F: Fn() -> Result<R>,
+    {
+        let prev_state = self.clone();
+        let res = f().ok();
+        if res.is_none() {
+            *self = prev_state;
+        }
+        res
     }
 
     fn scan_next(&mut self) -> Result<Option<(usize, Token)>> {
