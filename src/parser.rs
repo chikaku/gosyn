@@ -156,9 +156,9 @@ impl Parser {
         self.current = self.scan_next().unwrap();
     }
 
-    fn try_parse<R, F>(&mut self, f: F) -> Result<R>
+    fn try_parse<R, F>(&mut self, mut f: F) -> Result<R>
     where
-        F: Fn(&mut Self) -> Result<R>,
+        F: FnMut(&mut Self) -> Result<R>,
     {
         let prev_state = self.clone();
         let res = f(self);
@@ -419,7 +419,7 @@ impl Parser {
         };
 
         let params = self.parameters()?;
-        let params = self.check_parameters(params, true)?;
+        //        let params = self.check_parameters(params, true)?;
         let result = self.parse_result()?;
         let result = self.check_parameters(result, false)?;
 
@@ -1656,6 +1656,21 @@ impl Parser {
         Ok(ast::Type::Array(array))
     }
 
+    fn parse_type_args(&mut self, identifiers: &mut Vec<ast::Ident>) -> Result<ast::Type> {
+        let (arguments, pos) = self.type_arguments()?;
+        let Some(name) = identifiers.pop() else {
+            return Err(self.else_error_at(
+                pos.0,
+                "Unexpected type arguments without a type to instantiate",
+            ));
+        };
+        let name = ast::NameType::Ident(name);
+        Ok(ast::Type::Instantiated(ast::InstantiatedType {
+            pos,
+            name,
+            arguments,
+        }))
+    }
     /// x [n]E or x[n,], x[n1, n2], ...
     /// when we found an '[' it maybe an slice or array type or type args
     /// we will parse type list
@@ -1665,23 +1680,11 @@ impl Parser {
     /// While theoretically the remaining type could be an index expression, this function is only ever called in type parsing contexts so will not be.
     /// If it does parse type arguments then the last item in the identifiers Vec will be removed and used for the name of the instantiated type.
     fn array_or_typeargs(&mut self, identifiers: &mut Vec<ast::Ident>) -> Result<ast::Type> {
-        self.try_parse(|parser| Self::parse_slice_type(parser))
-            .or_else(|_| self.try_parse(|parser| Self::parse_array_type(parser)))
+        self.try_parse(Self::parse_slice_type)
             .or_else(|_| {
-                let (arguments, pos) = self.type_arguments()?;
-                let Some(name) = identifiers.pop() else {
-                    return Err(self.else_error_at(
-                        pos.0,
-                        "Unexpected type arguments without a type to instantiate",
-                    ));
-                };
-                let name = ast::NameType::Ident(name);
-                Ok(ast::Type::Instantiated(ast::InstantiatedType {
-                    pos,
-                    name,
-                    arguments,
-                }))
+                self.try_parse(move |parser: &mut Self| parser.parse_type_args(identifiers))
             })
+            .or_else(|_| self.parse_array_type())
     }
 
     // We return `ast::Type` here instead of `ast::NameType` as this also handles parsing instantiated types for qualified identifiers
