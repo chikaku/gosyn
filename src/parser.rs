@@ -2479,7 +2479,14 @@ fn is_type_elem(expr: &ast::Expression) -> bool {
         | ast::Expression::Type(ast::Type::Slice(..))
         | ast::Expression::Type(ast::Type::Map(..))
         | ast::Expression::Type(ast::Type::Channel(..)) => true,
+        ast::Expression::Type(ast::Type::Pointer(p)) => {
+            is_type_elem(&ast::Expression::Type((*p.typ).clone()))
+        }
+        ast::Expression::Type(ast::Type::Paren(p)) => {
+            is_type_elem(&ast::Expression::Type((*p.typ).clone()))
+        }
         ast::Expression::Paren(p) => is_type_elem(&p.expr),
+        ast::Expression::Star(p) => is_type_elem(&p.right),
         ast::Expression::Operation(opt) => match opt {
             ast::Operation { op: Operator::Tiled, .. } => true,
             ast::Operation { y: Some(opty), .. } => is_type_elem(opty),
