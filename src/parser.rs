@@ -156,13 +156,13 @@ impl Parser {
         self.current = self.scan_next().unwrap();
     }
 
-    fn try_parse<R, F>(&mut self, f: F) -> Option<Result<R>>
+    fn try_parse<R, F>(&mut self, f: F) -> Result<R>
     where
-        F: Fn() -> Option<Result<R>>,
+        F: Fn(&mut Self) -> Result<R>,
     {
         let prev_state = self.clone();
-        let res = f();
-        if res.is_none() {
+        let res = f(self);
+        if res.is_err() {
             *self = prev_state;
         }
         res
@@ -1633,6 +1633,29 @@ impl Parser {
         }
     }
 
+    fn parse_slice_type(&mut self) -> Result<ast::Type> {
+        let pos = (
+            self.expect(Operator::BarackLeft)?,
+            self.expect(Operator::BarackRight)?,
+        );
+        let typ = Box::new(self.type_()?);
+        let slice = ast::SliceType { pos, typ };
+        Ok(ast::Type::Slice(slice))
+    }
+
+    fn parse_array_type(&mut self) -> Result<ast::Type> {
+        let pos0 = self.expect(Operator::BarackLeft)?;
+        let expr = self.expression()?;
+        let pos1 = self.expect(Operator::BarackRight)?;
+        let typ = self.type_()?;
+        let array = ast::ArrayType {
+            pos: (pos0, pos1),
+            len: Box::new(expr),
+            typ: Box::new(typ),
+        };
+        Ok(ast::Type::Array(array))
+    }
+
     /// x [n]E or x[n,], x[n1, n2], ...
     /// when we found an '[' it maybe an slice or array type or type args
     /// we will parse type list
@@ -1642,68 +1665,23 @@ impl Parser {
     /// While theoretically the remaining type could be an index expression, this function is only ever called in type parsing contexts so will not be.
     /// If it does parse type arguments then the last item in the identifiers Vec will be removed and used for the name of the instantiated type.
     fn array_or_typeargs(&mut self, identifiers: &mut Vec<ast::Ident>) -> Result<ast::Type> {
-        let start = self.preback();
-
-        let pos0 = self.expect(Operator::BarackLeft)?;
-        if self.current_is(Operator::BarackRight) {
-            let pos = (pos0, self.expect(Operator::BarackRight)?);
-            let typ = Box::new(self.type_()?);
-            let slice = ast::SliceType { pos, typ };
-            return Ok(ast::Type::Slice(slice));
-        }
-
-        let (expr, _types, comma) = {
-            self.inc_expr_level()?;
-            let expr = self.expression()?;
-            let mut list = vec![];
-            let mut comma = self.skipped(Operator::Comma)?;
-            if comma {
-                if let Some(typ) = self.type_or_none()? {
-                    list.push(typ);
-                    while self.skipped(Operator::Comma)? {
-                        match self.type_or_none()? {
-                            Some(typ) => list.push(typ),
-                            None => break,
-                        }
-                    }
-                    comma = true;
-                }
-            }
-
-            self.dec_expr_level();
-            (expr, list, comma)
-        };
-        let pos1 = self.expect(Operator::BarackRight)?;
-
-        if !comma {
-            if let Some(typ) = self.type_or_none()? {
-                let array = ast::ArrayType {
-                    pos: (pos0, pos1),
-                    len: Box::new(expr),
-                    typ: Box::new(typ),
+        self.try_parse(|parser| Self::parse_slice_type(parser))
+            .or_else(|_| self.try_parse(|parser| Self::parse_array_type(parser)))
+            .or_else(|_| {
+                let (arguments, pos) = self.type_arguments()?;
+                let Some(name) = identifiers.pop() else {
+                    return Err(self.else_error_at(
+                        pos.0,
+                        "Unexpected type arguments without a type to instantiate",
+                    ));
                 };
-
-                return Ok(ast::Type::Array(array));
-            }
-        }
-
-        let Some(name) = identifiers.pop() else {
-            return Err(self.else_error_at(
-                pos0,
-                "Unexpected type arguments without a type to instantiate",
-            ));
-        };
-
-        // Easier to start again rather then convert an expression into a type
-        self.goback(start);
-
-        let (types, pos) = self.type_arguments()?;
-        let name = ast::NameType::Ident(name);
-        Ok(ast::Type::Instantiated(ast::InstantiatedType {
-            pos,
-            name,
-            arguments: types,
-        }))
+                let name = ast::NameType::Ident(name);
+                Ok(ast::Type::Instantiated(ast::InstantiatedType {
+                    pos,
+                    name,
+                    arguments,
+                }))
+            })
     }
 
     // We return `ast::Type` here instead of `ast::NameType` as this also handles parsing instantiated types for qualified identifiers
