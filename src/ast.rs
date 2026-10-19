@@ -31,7 +31,7 @@ pub struct Ident {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PointerType {
     pub pos: usize,
-    pub typ: Box<Expression>,
+    pub typ: Box<Type>,
 }
 
 #[derive(Debug, Clone)]
@@ -39,54 +39,97 @@ pub struct PointerType {
 pub struct ArrayType {
     pub pos: (usize, usize),
     pub len: Box<Expression>,
-    pub typ: Box<Expression>,
+    pub typ: Box<Type>,
 }
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SliceType {
     pub pos: (usize, usize),
-    pub typ: Box<Expression>,
+    pub typ: Box<Type>,
 }
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MapType {
     pub pos: (usize, usize),
-    pub key: Box<Expression>,
-    pub val: Box<Expression>,
+    pub key: Box<Type>,
+    pub val: Box<Type>,
 }
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Field {
-    pub name: Vec<Ident>,
-    pub typ: Expression,
+pub struct FieldDecl {
+    pub field: Field,
     pub tag: Option<StringLit>,
     pub comments: Vec<Rc<Comment>>,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct FieldList {
-    pub pos: Option<(usize, usize)>,
-    pub list: Vec<Field>,
+pub enum Field {
+    Named(NamedField),
+    Embedded(EmbeddedField),
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct NamedField {
+    pub name: Vec<Ident>,
+    pub typ: Type,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct EmbeddedField {
+    pub pointer: Option<usize>,
+    pub typ: NameType,
+    pub type_args: Vec<Type>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct MethodElem {
+    pub name: Ident,
+    pub typ: FuncType,
 }
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct StructType {
     pub pos: (usize, usize),
-    pub fields: Vec<Field>,
+    pub fields: Vec<FieldDecl>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ParameterSpec {
+    pub identifiers: Vec<Ident>,
+    pub variadic: Option<usize>, // If Some then represents the position of the ... operator
+    pub typ: Type,
+}
+
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Parameters {
+    pub pos: Option<(usize, usize)>,
+    pub parameters: Vec<ParameterSpec>,
 }
 
 #[derive(Default, Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FuncType {
     pub pos: usize,
-    pub typ_params: FieldList,
-    pub params: FieldList,
-    pub result: FieldList,
+    pub typ_params: Vec<TypeParamDecl>,
+    pub params: Parameters,
+    pub result: Parameters,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct TypeParamDecl {
+    pub name: Vec<Ident>,
+    pub constraint: TypeElem,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -101,14 +144,87 @@ pub enum ChanMode {
 pub struct ChannelType {
     pub pos: (usize, usize), // chan, <-
     pub dir: Option<ChanMode>,
-    pub typ: Box<Expression>,
+    pub typ: Box<Type>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum InterfaceElem {
+    Method(MethodElem),
+    Type(TypeElem),
 }
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct InterfaceType {
     pub pos: usize,
-    pub methods: FieldList,
+    pub elements: Vec<InterfaceElem>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct QualifiedName {
+    pub pos: usize,
+    pub package: Ident,
+    pub identifier: Ident,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum NameType {
+    Ident(Ident),
+    Qualified(QualifiedName),
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct InstantiatedType {
+    pub pos: (usize, usize),
+    pub name: NameType,
+    pub arguments: Vec<Type>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ParenType {
+    pub pos: (usize, usize),
+    pub typ: Box<Type>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Type {
+    Name(NameType),
+    Instantiated(InstantiatedType),
+    Map(MapType),             // map[K]V
+    Array(ArrayType),         // [N]T
+    Slice(SliceType),         // []T
+    Function(FuncType),       // func (...) ...
+    Struct(StructType),       // struct { ... }
+    Channel(ChannelType),     // <-chan T | chan<- T | chan T
+    Pointer(PointerType),     // *T
+    Interface(InterfaceType), // interface { ... }
+    Paren(ParenType),
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct UnderLyingType {
+    pub pos: usize,
+    pub typ: Box<Type>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum TypeTerm {
+    Type(Type),
+    UnderLyingType(UnderLyingType),
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct TypeElem {
+    pub types: Vec<TypeTerm>,
 }
 
 // ================ Expression Definition ================
@@ -176,7 +292,7 @@ pub struct Selector {
 pub struct TypeAssertion {
     pub pos: (usize, usize),
     pub left: Box<Expression>,
-    pub right: Option<Box<Expression>>, // None for x.(type)
+    pub right: Option<Box<Type>>, // None for x.(type)
 }
 
 #[derive(Debug, Clone)]
@@ -268,14 +384,7 @@ pub enum Expression {
     CompositeLit(CompositeLit),
     List(Vec<Expression>),
     Operation(Operation),
-    TypeMap(MapType),             // map[K]V
-    TypeArray(ArrayType),         // [N]T
-    TypeSlice(SliceType),         // []T
-    TypeFunction(FuncType),       // func (...) ...
-    TypeStruct(StructType),       // struct { ... }
-    TypeChannel(ChannelType),     // <-chan T | chan<- T | chan T
-    TypePointer(PointerType),     // *T
-    TypeInterface(InterfaceType), // interface { ... }
+    Type(Type),
 }
 
 // ================ Declaration Definition ================
@@ -294,7 +403,7 @@ pub struct Decl<T> {
 pub struct VarSpec {
     pub docs: Vec<Rc<Comment>>,
     pub name: Vec<Ident>,
-    pub typ: Option<Expression>,
+    pub typ: Option<Type>,
     pub values: Vec<Expression>,
 }
 
@@ -303,7 +412,7 @@ pub struct VarSpec {
 pub struct ConstSpec {
     pub docs: Vec<Rc<Comment>>,
     pub name: Vec<Ident>,
-    pub typ: Option<Expression>,
+    pub typ: Option<Type>,
     pub values: Vec<Expression>,
 }
 
@@ -313,15 +422,15 @@ pub struct TypeSpec {
     pub docs: Vec<Rc<Comment>>,
     pub alias: bool,
     pub name: Ident,
-    pub params: FieldList,
-    pub typ: Expression,
+    pub params: Vec<TypeParamDecl>,
+    pub typ: Type,
 }
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FuncDecl {
     pub docs: Vec<Rc<Comment>>,
-    pub recv: Option<FieldList>,
+    pub recv: Option<Parameters>,
     pub name: Ident,
     pub typ: FuncType,
     pub body: Option<BlockStmt>,
@@ -427,27 +536,35 @@ pub struct ExprStmt {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct CaseClause {
+pub struct ExprCaseClause {
     pub tok: Keyword,
     pub pos: (usize, usize),
     pub list: Vec<Expression>,
     pub body: Box<Vec<Statement>>,
 }
-
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct CaseBlock {
+pub struct TypeCaseClause {
+    pub tok: Keyword,
     pub pos: (usize, usize),
-    pub body: Vec<CaseClause>,
+    pub list: Vec<Type>,
+    pub body: Box<Vec<Statement>>,
 }
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct SwitchStmt {
+pub struct CaseBlock<T> {
+    pub pos: (usize, usize),
+    pub body: Vec<T>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ExprSwitchStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
     pub tag: Option<Expression>,
-    pub block: CaseBlock,
+    pub block: CaseBlock<ExprCaseClause>,
 }
 
 #[derive(Debug, Clone)]
@@ -456,7 +573,14 @@ pub struct TypeSwitchStmt {
     pub pos: usize,
     pub init: Option<Box<Statement>>,
     pub tag: Option<Box<Statement>>,
-    pub block: CaseBlock,
+    pub block: CaseBlock<TypeCaseClause>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SwitchStmt {
+    Expr(ExprSwitchStmt),
+    Type(TypeSwitchStmt),
 }
 
 #[derive(Debug, Clone)]
@@ -537,7 +661,6 @@ pub enum Statement {
     Branch(BranchStmt),
     Switch(SwitchStmt),
     Select(SelectStmt),
-    TypeSwitch(TypeSwitchStmt),
     Declaration(DeclStmt),
 }
 
@@ -569,32 +692,10 @@ pub struct Package {
 
 // ================ Type Implemention ================
 
-impl From<Ident> for Field {
-    fn from(id: Ident) -> Self {
-        Self {
-            name: vec![],
-            typ: Expression::Ident(id),
-            tag: None,
-            comments: Default::default(),
-        }
-    }
-}
-
 impl From<BasicLit> for StringLit {
     fn from(lit: BasicLit) -> StringLit {
         assert_eq!(lit.kind, LitKind::String);
         StringLit { pos: lit.pos, value: lit.value }
-    }
-}
-
-impl From<Expression> for Field {
-    fn from(expr: Expression) -> Self {
-        Self {
-            name: vec![],
-            typ: expr,
-            tag: None,
-            comments: Default::default(),
-        }
     }
 }
 
@@ -604,18 +705,18 @@ impl AssignStmt {
     }
 }
 
-impl FieldList {
+impl Parameters {
     pub fn pos(&self) -> usize {
         if let Some((pos, _)) = self.pos {
             return pos;
         }
 
-        if let Some(field) = self.list.first() {
-            if let Some(name) = field.name.first() {
+        if let Some(parameter) = self.parameters.first() {
+            if let Some(name) = parameter.identifiers.first() {
                 return name.pos;
             }
 
-            return field.typ.pos();
+            return parameter.typ.pos();
         }
 
         panic!("call pos on empty FieldList");
@@ -641,14 +742,43 @@ impl Expression {
             Expression::IndexList(x) => x.left.pos(),
             Expression::List(_) => unimplemented!("list may empty"),
             Expression::Operation(x) => x.x.pos(),
-            Expression::TypeMap(x) => x.pos.0,
-            Expression::TypeArray(x) => x.pos.0,
-            Expression::TypeSlice(x) => x.pos.0,
-            Expression::TypeFunction(f) => f.pos,
-            Expression::TypeStruct(x) => x.pos.0,
-            Expression::TypeChannel(x) => x.pos.0,
-            Expression::TypePointer(x) => x.pos,
-            Expression::TypeInterface(x) => x.pos,
+            Expression::Type(typ) => typ.pos(),
+        }
+    }
+}
+
+impl TypeTerm {
+    pub fn pos(&self) -> usize {
+        match self {
+            Self::Type(typ) => typ.pos(),
+            Self::UnderLyingType(typ) => typ.pos,
+        }
+    }
+}
+
+impl TypeElem {
+    pub fn pos(&self) -> usize {
+        self.types[0].pos()
+    }
+}
+
+impl Type {
+    pub fn pos(&self) -> usize {
+        match self {
+            Type::Map(x) => x.pos.0,
+            Type::Array(x) => x.pos.0,
+            Type::Slice(x) => x.pos.0,
+            Type::Function(f) => f.pos,
+            Type::Struct(x) => x.pos.0,
+            Type::Channel(x) => x.pos.0,
+            Type::Pointer(x) => x.pos,
+            Type::Interface(x) => x.pos,
+            Type::Name(name_type) => match name_type {
+                NameType::Ident(ident) => ident.pos,
+                NameType::Qualified(qualified_ident) => qualified_ident.package.pos,
+            },
+            Type::Instantiated(instantiated_type) => instantiated_type.pos.0,
+            Type::Paren(paren_type) => paren_type.pos.0,
         }
     }
 }
@@ -697,14 +827,7 @@ impl Debug for Expression {
             Self::CompositeLit(arg0) => f.debug_tuple("CompositeLit").field(arg0).finish(),
             Self::List(arg0) => f.debug_tuple("List").field(arg0).finish(),
             Self::Operation(arg0) => f.debug_tuple("Operation").field(arg0).finish(),
-            Self::TypeMap(arg0) => f.debug_tuple("TypeMap").field(arg0).finish(),
-            Self::TypeArray(arg0) => f.debug_tuple("TypeArray").field(arg0).finish(),
-            Self::TypeSlice(arg0) => f.debug_tuple("TypeSlice").field(arg0).finish(),
-            Self::TypeFunction(arg0) => f.debug_tuple("TypeFunction").field(arg0).finish(),
-            Self::TypeStruct(arg0) => f.debug_tuple("TypeStruct").field(arg0).finish(),
-            Self::TypeChannel(arg0) => f.debug_tuple("TypeChannel").field(arg0).finish(),
-            Self::TypePointer(arg0) => f.debug_tuple("TypePointer").field(arg0).finish(),
-            Self::TypeInterface(arg0) => f.debug_tuple("TypeInterface").field(arg0).finish(),
+            Self::Type(arg0) => f.debug_tuple("Type").field(arg0).finish(),
         }
     }
 }
@@ -726,9 +849,11 @@ impl Debug for Statement {
             Self::Assign(arg0) => f.debug_tuple("Assign").field(arg0).finish(),
             Self::Return(arg0) => f.debug_tuple("Return").field(arg0).finish(),
             Self::Branch(arg0) => f.debug_tuple("Branch").field(arg0).finish(),
-            Self::Switch(arg0) => f.debug_tuple("Switch").field(arg0).finish(),
+            Self::Switch(SwitchStmt::Expr(arg0)) => f.debug_tuple("Switch").field(arg0).finish(),
             Self::Select(arg0) => f.debug_tuple("Select").field(arg0).finish(),
-            Self::TypeSwitch(arg0) => f.debug_tuple("TypeSwitch").field(arg0).finish(),
+            Self::Switch(SwitchStmt::Type(arg0)) => {
+                f.debug_tuple("TypeSwitch").field(arg0).finish()
+            }
             Self::Declaration(arg0) => f.debug_tuple("Declaration").field(arg0).finish(),
         }
     }

@@ -1,4 +1,4 @@
-use gosyn::ast::{Comment, Declaration, Expression};
+use gosyn::ast::{Comment, Declaration, Type};
 use gosyn::parse_source;
 
 use std::rc::Rc;
@@ -116,7 +116,7 @@ var (
     assert!(bare.docs.is_empty());
     assert_eq!(comment_texts(&first.docs), ["/* first function */"]);
 
-    let Expression::TypeStruct(struct_type) = &types.specs[0].typ else {
+    let Type::Struct(struct_type) = &types.specs[0].typ else {
         panic!("expected a struct type, got {:#?}", types.specs[0].typ);
     };
     assert_eq!(
@@ -147,7 +147,7 @@ type S struct {
     let Declaration::Type(types) = &file.decl[0] else {
         panic!("expected a type declaration, got {:#?}", file.decl[0]);
     };
-    let Expression::TypeStruct(struct_type) = &types.specs[0].typ else {
+    let Type::Struct(struct_type) = &types.specs[0].typ else {
         panic!("expected a struct type, got {:#?}", types.specs[0].typ);
     };
 
@@ -224,7 +224,7 @@ fn records_type_argument_comments_once() {
         );
 
         if let Declaration::Type(types) = &file.decl[0] {
-            let Expression::TypeStruct(struct_type) = &types.specs[0].typ else {
+            let Type::Struct(struct_type) = &types.specs[0].typ else {
                 panic!("expected a struct type: {source}");
             };
             assert_eq!(

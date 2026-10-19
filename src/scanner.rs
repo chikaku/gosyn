@@ -13,7 +13,7 @@ use std::str::FromStr;
 use anyhow::Result;
 use unic_ucd_category::GeneralCategory;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Scanner {
     pos: usize, // index as chars
     semicolon: bool,
