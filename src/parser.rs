@@ -199,7 +199,7 @@ impl Parser {
 
     fn drain_comments(&mut self) -> Vec<Rc<ast::Comment>> {
         self.lead_comment_end_line = None;
-        self.lead_comments.drain(0..).collect()
+        std::mem::take(&mut self.lead_comments)
     }
 
     fn line_end_comment(&mut self) -> Result<Option<Rc<ast::Comment>>> {
