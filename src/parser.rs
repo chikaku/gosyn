@@ -400,7 +400,7 @@ impl Parser {
             .map_or(Ok(None), |x| x.map(Some))?;
 
         let name = self.identifier()?;
-        let typ_params = if recv.is_none() && self.current_is(Operator::BarackLeft) {
+        let typ_params = if self.current_is(Operator::BarackLeft) {
             self.parse_type_parameters()?.0
         } else {
             Default::default()
@@ -2576,6 +2576,14 @@ mod test {
         func("func f(prefix string, values ...int)", (None, 0, 2, 0))?;
         func("func min[S interface{ ~[]byte|string }]()", (None, 1, 0, 0))?;
 
+        func("func (S) Map[T any](value T) T", (Some(()), 1, 1, 1))?;
+        func("func (s *S) Map[T any](value T) T", (Some(()), 1, 1, 1))?;
+        func("func (s S[T]) Map[U any](value U) U", (Some(()), 1, 1, 1))?;
+        func(
+            "func (s *S[T]) Pair[U any, V ~int](u U, v V) (U, V)",
+            (Some(()), 2, 2, 2),
+        )?;
+
         func(
             "func f(int, int, float64) (float64, *[]int)",
             (None, 0, 3, 2),
@@ -3109,6 +3117,7 @@ mod test {
         ",
         )?;
 
+        assert!(interface("interface { Map[T any](T) T }").is_err());
         assert!(interface("interface {a b}").is_err());
         assert!(interface("interface {a, b;}").is_err());
         assert!(interface("interface {a | b c}").is_err());
